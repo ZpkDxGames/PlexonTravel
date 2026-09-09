@@ -6,47 +6,10 @@ on:
   pull_request:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  patch:
-    if: ${{ github.event_name == 'push' && github.ref_name == 'agent/1.0.1-core204-certification' && !contains(github.event.head_commit.message, '[travel-core-patched]') }}
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: agent/1.0.1-core204-certification
-          fetch-depth: 0
-      - name: Apply owner-aware Core lifecycle replacements
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path('src/main/java/com/plexon/travel/PlexonTravel.java')
-          t = p.read_text()
-          replacements = [
-              ('if (!core.supportsApi(2, 0)) {', 'if (!ModuleVersionRange.parse(">=2.0 <3.0").contains(core.version())) {'),
-              ('getLogger().severe("PlexonCore API 2.0 is required; running " + core.version().apiVersion());', 'getLogger().severe("PlexonCore API " + core.version().apiVersion() + " is outside supported range >=2.0 <3.0");'),
-              ('core.modules().updateState(MODULE_ID, ModuleState.FAILED,', 'core.modules().updateState(MODULE_ID, this, ModuleState.FAILED,'),
-              ('core.modules().updateState(MODULE_ID, ModuleState.READY,', 'core.modules().updateState(MODULE_ID, this, ModuleState.READY,'),
-              ('core.modules().updateState(MODULE_ID, ModuleState.DISABLED,', 'core.modules().updateState(MODULE_ID, this, ModuleState.DISABLED,'),
-              ('core.modules().unregister(MODULE_ID)', 'core.modules().unregisterOwnedBy(this)'),
-          ]
-          for old, new in replacements:
-              if old not in t:
-                  raise SystemExit('missing expected Travel source fragment: ' + old)
-              t = t.replace(old, new)
-          p.write_text(t)
-          PY
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add src/main/java/com/plexon/travel/PlexonTravel.java
-          git commit -m '[travel-core-patched] owner-aware Core 2.0.4 lifecycle'
-          git push origin HEAD:agent/1.0.1-core204-certification
-
   verify:
-    if: ${{ github.event_name == 'push' && contains(github.event.head_commit.message, '[travel-core-patched]') }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -59,10 +22,21 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          curl -L --fail --retry 3 -o /tmp/PlexonCore-2.0.4.jar https://github.com/ZpkDxGames/PlexonCore/releases/download/v2.0.4/PlexonCore-2.0.4.jar
+          curl -L --fail --retry 3 -o /tmp/PlexonCore-2.0.4.jar \
+            https://github.com/ZpkDxGames/PlexonCore/releases/download/v2.0.4/PlexonCore-2.0.4.jar
           echo '61d625a717da9f46ee9231e1970d84b4c317ae12cf4090cdf7c9d39b6a1a9baf  /tmp/PlexonCore-2.0.4.jar' | sha256sum -c -
-          mvn -B -ntp org.apache.maven.plugins:maven-install-plugin:3.1.4:install-file -Dfile=/tmp/PlexonCore-2.0.4.jar -DgroupId=com.zpkdxgames -DartifactId=PlexonCore -Dversion=2.0.4 -Dpackaging=jar
+          mvn -B -ntp org.apache.maven.plugins:maven-install-plugin:3.1.4:install-file \
+            -Dfile=/tmp/PlexonCore-2.0.4.jar -DgroupId=com.zpkdxgames -DartifactId=PlexonCore -Dversion=2.0.4 -Dpackaging=jar
       - name: Test and package
         run: mvn -B -ntp clean verify
       - name: Verify installable JAR
         run: ./scripts/verify-distribution.sh target/PlexonTravel-1.0.1.jar
+      - name: Checksum
+        run: sha256sum target/PlexonTravel-1.0.1.jar | sed 's#target/##' > SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PlexonTravel-1.0.1
+          path: |
+            target/PlexonTravel-1.0.1.jar
+            SHA256SUMS.txt
+          if-no-files-found: error
