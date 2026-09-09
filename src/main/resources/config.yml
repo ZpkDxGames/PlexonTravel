@@ -1,0 +1,53 @@
+teleport:
+  movement-threshold: 0.01
+  spawn:
+    warmup-seconds: 3
+    cooldown-seconds: 10
+    fee: 0.0
+  hub:
+    warmup-seconds: 3
+    cooldown-seconds: 10
+    fee: 0.0
+  warp:
+    warmup-seconds: 3
+    cooldown-seconds: 10
+    default-fee: 0.0
+  back:
+    warmup-seconds: 5
+    cooldown-seconds: 15
+    fee: 0.0
+  admin:
+    warmup-seconds: 0
+    cooldown-seconds: 0
+    fee: 0.0
+
+safe-teleport:
+  enabled: true
+  search-nearby: true
+  horizontal-radius: 3
+  vertical-radius: 4
+
+back:
+  persist-across-restart: true
+  capture:
+    external-teleports: true
+    deaths: true
+    portals: false
+
+cooldowns:
+  mode: PER_TYPE
+
+hub:
+  mode: SEPARATE
+
+join:
+  teleport-to-spawn: false
+
+respawn:
+  mode: VANILLA
+
+migration:
+  # Keep false until /traveladmin migrate scan and staging verification are complete.
+  claim-standard-commands: false
+  # Execute is intentionally gated separately from scan/plan/status.
+  allow-execute: false

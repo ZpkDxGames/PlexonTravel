@@ -1,0 +1,60 @@
+name: Release 1.0.0
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Skip when v1.0.0 already exists
+        id: existing
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view v1.0.0 >/dev/null 2>&1; then
+            echo 'exists=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'exists=false' >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/setup-java@v5
+        if: steps.existing.outputs.exists != 'true'
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+      - name: Provision exact PlexonCore 2.0.0
+        if: steps.existing.outputs.exists != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -L --fail --retry 3 -o /tmp/PlexonCore-2.0.0.jar \
+            https://github.com/ZpkDxGames/PlexonCore/releases/download/v2.0.0/PlexonCore-2.0.0.jar
+          echo '179b82ce7fd82e3095b3a6d0d893af6d7c97f91bd7ce403e96d7f3581462dfec  /tmp/PlexonCore-2.0.0.jar' | sha256sum -c -
+          mvn -B -ntp org.apache.maven.plugins:maven-install-plugin:3.1.4:install-file \
+            -Dfile=/tmp/PlexonCore-2.0.0.jar -DgroupId=com.zpkdxgames -DartifactId=PlexonCore -Dversion=2.0.0 -Dpackaging=jar
+      - name: Build candidate
+        if: steps.existing.outputs.exists != 'true'
+        run: mvn -B -ntp clean verify
+      - name: Verify distribution
+        if: steps.existing.outputs.exists != 'true'
+        run: ./scripts/verify-distribution.sh target/PlexonTravel-1.0.0.jar
+      - name: Create checksum
+        if: steps.existing.outputs.exists != 'true'
+        run: sha256sum target/PlexonTravel-1.0.0.jar | sed 's#target/##' > SHA256SUMS.txt
+      - name: Publish v1.0.0 candidate release
+        if: steps.existing.outputs.exists != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v1.0.0 target/PlexonTravel-1.0.0.jar SHA256SUMS.txt \
+            --target "$GITHUB_SHA" \
+            --title 'PlexonTravel 1.0.0' \
+            --notes-file releases/1.0.0.md \
+            --prerelease

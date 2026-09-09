@@ -1,0 +1,89 @@
+name: PlexonTravel
+version: '${project.version}'
+main: com.plexon.travel.PlexonTravel
+api-version: '26.2'
+description: Core-native spawn, hub, back and warp travel for PlexonCraft.
+author: ZpkDxGames
+depend:
+  - PlexonCore
+softdepend:
+  - Vault
+  - PlaceholderAPI
+  - PlexonRanks
+  - PlexonQuests
+commands:
+  spawn:
+    description: Travel to server spawn.
+    permission: plexontravel.spawn
+  hub:
+    description: Travel to the configured hub.
+    permission: plexontravel.hub
+  back:
+    description: Return to the previous meaningful location.
+    permission: plexontravel.back
+  warp:
+    description: Travel to a warp.
+    usage: /warp [name]
+    permission: plexontravel.warp
+  warps:
+    description: Open the warp browser.
+    permission: plexontravel.warps
+  setspawn:
+    description: Set the PlexonTravel spawn.
+    permission: plexontravel.admin.destinations
+  sethub:
+    description: Set the PlexonTravel hub.
+    permission: plexontravel.admin.destinations
+  setwarp:
+    description: Create or update a warp.
+    usage: /setwarp <name>
+    permission: plexontravel.admin.warps
+  delwarp:
+    description: Delete a warp.
+    usage: /delwarp <name>
+    permission: plexontravel.admin.warps
+  renamewarp:
+    description: Rename a warp.
+    usage: /renamewarp <old> <new>
+    permission: plexontravel.admin.warps
+  ptravel:
+    description: Staging-safe travel command namespace.
+    usage: /ptravel <spawn|hub|back|warp|warps>
+  traveladmin:
+    description: PlexonTravel administration and diagnostics.
+    permission: plexontravel.admin
+permissions:
+  plexontravel.spawn:
+    default: true
+  plexontravel.hub:
+    default: true
+  plexontravel.back:
+    default: true
+  plexontravel.warp:
+    default: true
+  plexontravel.warps:
+    default: true
+  plexontravel.cooldown.bypass:
+    default: op
+  plexontravel.warmup.bypass:
+    default: op
+  plexontravel.fee.bypass:
+    default: op
+  plexontravel.admin:
+    default: op
+    children:
+      plexontravel.admin.reload: true
+      plexontravel.admin.destinations: true
+      plexontravel.admin.warps: true
+      plexontravel.admin.migrate: true
+      plexontravel.admin.diagnostics: true
+  plexontravel.admin.reload:
+    default: op
+  plexontravel.admin.destinations:
+    default: op
+  plexontravel.admin.warps:
+    default: op
+  plexontravel.admin.migrate:
+    default: op
+  plexontravel.admin.diagnostics:
+    default: op
