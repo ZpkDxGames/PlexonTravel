@@ -6,7 +6,7 @@ PlexonTravel is the focused Core-native travel module for PlexonCraft.
 
 - Paper `26.2.build.121-stable`
 - Java `25`
-- PlexonCore `2.0.0` / Core API `2.0`
+- PlexonCore `2.0.4` / Core API `2.0`
 - Maven reproducible build
 
 ## Scope
@@ -21,8 +21,10 @@ Standard travel commands are registered but runtime takeover defaults to disable
 
 ## Build
 
-CI provisions the exact released `PlexonCore-2.0.0.jar`, verifies its pinned SHA-256, runs `mvn clean verify`, verifies the shaded distribution, computes `SHA256SUMS.txt`, and uploads the installable JAR.
+CI provisions the exact released `PlexonCore-2.0.4.jar`, verifies its pinned SHA-256, runs `mvn clean verify`, verifies the shaded distribution, computes `SHA256SUMS.txt`, and uploads the installable JAR.
 
-The release artifact is `PlexonTravel-1.0.0.jar`.
+The stable maintenance artifact is `PlexonTravel-1.0.1.jar`.
 
-See `docs/STAGING.md` and `docs/TRAVEL_SOURCE_AUDIT.md` before promoting the initial prerelease to stable production use.
+Runtime command takeover, observed Core READY state, restart/soak and Spark validation remain deployment gates and are not claimed by source/CI certification.
+
+See `docs/STAGING.md` and `docs/TRAVEL_SOURCE_AUDIT.md` before enabling standard-command takeover.

@@ -4,7 +4,7 @@
 
   <groupId>com.zpkdxgames</groupId>
   <artifactId>PlexonTravel</artifactId>
-  <version>1.0.0</version>
+  <version>1.0.1</version>
   <name>PlexonTravel</name>
   <description>Core-native spawn, hub, back and warp runtime for PlexonCraft.</description>
   <url>https://github.com/ZpkDxGames/PlexonTravel</url>
@@ -13,7 +13,7 @@
     <maven.compiler.release>25</maven.compiler.release>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <paper.version>26.2.build.121-stable</paper.version>
-    <core.version>2.0.0</core.version>
+    <core.version>2.0.4</core.version>
     <sqlite.version>3.53.4.0</sqlite.version>
     <junit.version>5.12.2</junit.version>
   </properties>

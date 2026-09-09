@@ -123,8 +123,8 @@ public final class PlexonTravel extends JavaPlugin implements Listener {
             return;
         }
         core = coreRegistration.getProvider();
-        if (!core.supportsApi(2, 0)) {
-            getLogger().severe("PlexonCore API 2.0 is required; running " + core.version().apiVersion());
+        if (!ModuleVersionRange.parse(">=2.0 <3.0").contains(core.version())) {
+            getLogger().severe("PlexonCore API " + core.version().apiVersion() + " is outside supported range >=2.0 <3.0");
             getServer().getPluginManager().disablePlugin(this);
             return;
         }
@@ -155,7 +155,7 @@ public final class PlexonTravel extends JavaPlugin implements Listener {
             warps.putAll(storage.loadWarps());
             back.putAll(storage.loadBack());
         } catch (Exception failure) {
-            core.modules().updateState(MODULE_ID, ModuleState.FAILED, "Persistence startup failed: " + failure.getMessage());
+            core.modules().updateState(MODULE_ID, this, ModuleState.FAILED, "Persistence startup failed: " + failure.getMessage());
             getLogger().log(Level.SEVERE, "Failed to initialize travel persistence", failure);
             getServer().getPluginManager().disablePlugin(this);
             return;
@@ -171,7 +171,7 @@ public final class PlexonTravel extends JavaPlugin implements Listener {
         registerCommands();
         travel.startTicker();
 
-        core.modules().updateState(MODULE_ID, ModuleState.READY,
+        core.modules().updateState(MODULE_ID, this, ModuleState.READY,
             "Core " + core.version().pluginVersion() + " / API " + core.version().apiVersion() + "; " + warps.size() + " warps cached");
         getLogger().info("PlexonTravel " + getPluginMeta().getVersion() + " enabled against PlexonCore " + core.version().pluginVersion());
     }
@@ -181,8 +181,8 @@ public final class PlexonTravel extends JavaPlugin implements Listener {
         if (travel != null) travel.shutdown();
         if (getServer() != null) getServer().getServicesManager().unregisterAll(this);
         if (core != null) {
-            try { core.modules().updateState(MODULE_ID, ModuleState.DISABLED, "Plugin disabled"); } catch (Throwable ignored) {}
-            try { core.modules().unregister(MODULE_ID); } catch (Throwable ignored) {}
+            try { core.modules().updateState(MODULE_ID, this, ModuleState.DISABLED, "Plugin disabled"); } catch (Throwable ignored) {}
+            try { core.modules().unregisterOwnedBy(this); } catch (Throwable ignored) {}
         }
         if (storage != null) storage.close();
     }
