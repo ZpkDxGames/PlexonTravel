@@ -1,0 +1,7 @@
+# Migration source adapters are read-only. Source data is never modified.
+essentials:
+  enabled: true
+worldspawn:
+  enabled: true
+multiverse:
+  enabled: true

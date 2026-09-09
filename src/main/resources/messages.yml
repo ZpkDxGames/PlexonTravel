@@ -1,0 +1,3 @@
+# Reserved for message customization in a follow-up release.
+# PlexonTravel 1.0.0 keeps runtime strings compact and centralized in the plugin.
+prefix: '<aqua>PlexonTravel</aqua>'
