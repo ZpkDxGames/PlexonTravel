@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   patch:
-    if: github.event_name == 'push' && github.ref_name == 'agent/1.0.1-core204-certification' && !contains(github.event.head_commit.message, '[travel-1.0.1-patched]')
+    if: ${{ github.event_name == 'push' && github.ref_name == 'agent/1.0.1-core204-certification' && github.event.head_commit.message != '[travel-1.0.1-patched] Core 2.0.4 lifecycle maintenance' }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -194,7 +194,7 @@ class CoreLifecyclePolicyTest {
           git push origin HEAD:agent/1.0.1-core204-certification
 
   verify:
-    if: github.event_name == 'push' && contains(github.event.head_commit.message, '[travel-1.0.1-patched]')
+    if: ${{ github.event_name == 'push' && contains(github.event.head_commit.message, '[travel-1.0.1-patched]') }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
