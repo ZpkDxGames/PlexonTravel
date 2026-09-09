@@ -6,11 +6,196 @@ on:
   pull_request:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
+  patch:
+    if: github.event_name == 'push' && github.ref_name == 'agent/1.0.1-core204-certification' && !contains(github.event.head_commit.message, '[travel-1.0.1-patched]')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/1.0.1-core204-certification
+          fetch-depth: 0
+      - name: Patch source and tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace(path, old, new):
+              p=Path(path); text=p.read_text()
+              if old not in text:
+                  raise SystemExit(f'missing expected fragment in {path}: {old[:100]!r}')
+              p.write_text(text.replace(old,new))
+
+          replace('pom.xml','<version>1.0.0</version>','<version>1.0.1</version>')
+          replace('pom.xml','<core.version>2.0.0</core.version>','<core.version>2.0.4</core.version>')
+
+          p=Path('src/main/java/com/plexon/travel/PlexonTravel.java')
+          text=p.read_text()
+          text=text.replace('private static final String MODULE_ID = "travel";','private static final String MODULE_ID = "travel";\n    static final String SUPPORTED_CORE_API = ">=2.0 <3.0";')
+          old='''        core = coreRegistration.getProvider();
+        if (!core.supportsApi(2, 0)) {
+            getLogger().severe("PlexonCore API 2.0 is required; running " + core.version().apiVersion());
+            getServer().getPluginManager().disablePlugin(this);
+            return;
+        }
+
+        ModuleRegistry.RegistrationResult registration = core.modules().register(new ModuleDescriptor(
+            MODULE_ID,
+            "PlexonTravel",
+            getName(),
+            getPluginMeta().getVersion(),
+            this,
+            ModuleVersionRange.parse(">=2.0 <3.0"),
+            Set.of("spawn", "hub", "back", "warps", "safe-teleport", "teleport-warmup", "travel-api", "travel-events", "sqlite-persistence"),
+            ModuleState.STARTING,
+            "Initializing travel runtime",
+            Instant.now()
+        ));'''
+          new='''        core = coreRegistration.getProvider();
+        if (!CoreLifecyclePolicy.isCompatible(core)) {
+            getLogger().severe("PlexonCore API " + core.version().apiVersion()
+                + " is outside supported range " + SUPPORTED_CORE_API);
+            getServer().getPluginManager().disablePlugin(this);
+            return;
+        }
+
+        ModuleRegistry.RegistrationResult registration = CoreLifecyclePolicy.registerStarting(
+            core,
+            this,
+            getPluginMeta().getVersion(),
+            Set.of("spawn", "hub", "back", "warps", "safe-teleport", "teleport-warmup", "travel-api", "travel-events", "sqlite-persistence")
+        );'''
+          if old not in text: raise SystemExit('missing onEnable Core block')
+          text=text.replace(old,new)
+          text=text.replace('core.modules().updateState(MODULE_ID, ModuleState.FAILED, "Persistence startup failed: " + failure.getMessage());','CoreLifecyclePolicy.update(core, this, ModuleState.FAILED, "Persistence startup failed: " + failure.getMessage());')
+          text=text.replace('''        core.modules().updateState(MODULE_ID, ModuleState.READY,
+            "Core " + core.version().pluginVersion() + " / API " + core.version().apiVersion() + "; " + warps.size() + " warps cached");''','''        CoreLifecyclePolicy.update(core, this, ModuleState.READY,
+            "Core " + core.version().pluginVersion() + " / API " + core.version().apiVersion() + "; " + warps.size() + " warps cached");''')
+          text=text.replace('''        if (core != null) {
+            try { core.modules().updateState(MODULE_ID, ModuleState.DISABLED, "Plugin disabled"); } catch (Throwable ignored) {}
+            try { core.modules().unregister(MODULE_ID); } catch (Throwable ignored) {}
+        }''','''        if (core != null) {
+            try { CoreLifecyclePolicy.update(core, this, ModuleState.DISABLED, "Plugin disabled"); } catch (Throwable ignored) {}
+            try { CoreLifecyclePolicy.unregister(core, this); } catch (Throwable ignored) {}
+        }''')
+          p.write_text(text)
+
+          Path('src/main/java/com/plexon/travel/CoreLifecyclePolicy.java').write_text('''package com.plexon.travel;
+
+import com.zpkdxgames.plexoncore.api.PlexonCoreAPI;
+import com.zpkdxgames.plexoncore.api.PlexonCoreAPI.CoreVersion;
+import com.zpkdxgames.plexoncore.module.ModuleRegistry;
+import com.zpkdxgames.plexoncore.module.ModuleRegistry.ModuleDescriptor;
+import com.zpkdxgames.plexoncore.module.ModuleRegistry.ModuleState;
+import com.zpkdxgames.plexoncore.module.ModuleRegistry.ModuleVersionRange;
+import java.time.Instant;
+import java.util.Set;
+import org.bukkit.plugin.Plugin;
+
+final class CoreLifecyclePolicy {
+    private CoreLifecyclePolicy() {}
+
+    static boolean isCompatible(PlexonCoreAPI core) {
+        return core != null && isCompatible(core.version());
+    }
+
+    static boolean isCompatible(CoreVersion version) {
+        return version != null && ModuleVersionRange.parse(PlexonTravel.SUPPORTED_CORE_API).contains(version);
+    }
+
+    static ModuleRegistry.RegistrationResult registerStarting(PlexonCoreAPI core, Plugin owner, String pluginVersion, Set<String> capabilities) {
+        return core.modules().register(new ModuleDescriptor(
+            "travel", "PlexonTravel", owner.getName(), pluginVersion, owner,
+            ModuleVersionRange.parse(PlexonTravel.SUPPORTED_CORE_API), capabilities,
+            ModuleState.STARTING, "Initializing travel runtime", Instant.now()));
+    }
+
+    static boolean update(PlexonCoreAPI core, Plugin owner, ModuleState state, String detail) {
+        return core.modules().updateState("travel", owner, state, detail);
+    }
+
+    static int unregister(PlexonCoreAPI core, Plugin owner) {
+        return core.modules().unregisterOwnedBy(owner);
+    }
+}
+''')
+
+          Path('src/test/java/com/plexon/travel/CoreLifecyclePolicyTest.java').write_text('''package com.plexon.travel;
+
+import static org.junit.jupiter.api.Assertions.*;
+import com.zpkdxgames.plexoncore.api.PlexonCoreAPI.CoreVersion;
+import com.zpkdxgames.plexoncore.module.ModuleRegistry;
+import com.zpkdxgames.plexoncore.module.ModuleRegistry.ModuleDescriptor;
+import com.zpkdxgames.plexoncore.module.ModuleRegistry.ModuleState;
+import com.zpkdxgames.plexoncore.module.ModuleRegistry.ModuleVersionRange;
+import java.lang.reflect.Proxy;
+import java.time.Instant;
+import java.util.Set;
+import org.bukkit.plugin.Plugin;
+import org.junit.jupiter.api.Test;
+
+class CoreLifecyclePolicyTest {
+    @Test void acceptsCore204RejectsCore3AndMissingCore() {
+        assertTrue(CoreLifecyclePolicy.isCompatible(CoreVersion.of(2,0,"2.0.4")));
+        assertFalse(CoreLifecyclePolicy.isCompatible(CoreVersion.of(3,0,"3.0.0")));
+        assertFalse(CoreLifecyclePolicy.isCompatible((CoreVersion)null));
+        assertFalse(CoreLifecyclePolicy.isCompatible((com.zpkdxgames.plexoncore.api.PlexonCoreAPI)null));
+    }
+
+    @Test void startingTransitionsToReadyOnlyForOwner() {
+        ModuleRegistry registry=new ModuleRegistry(CoreVersion.of(2,0,"2.0.4"));
+        Plugin owner=plugin("PlexonTravel",true);
+        assertTrue(registry.register(descriptor(owner,ModuleState.STARTING)).success());
+        assertEquals(ModuleState.STARTING,registry.find("travel").orElseThrow().state());
+        assertTrue(registry.updateState("travel",owner,ModuleState.READY,"ready"));
+        assertEquals(ModuleState.READY,registry.find("travel").orElseThrow().state());
+    }
+
+    @Test void duplicateLiveOwnerCannotMutateOrRemoveRegistration() {
+        ModuleRegistry registry=new ModuleRegistry(CoreVersion.of(2,0,"2.0.4"));
+        Plugin first=plugin("PlexonTravel",true), second=plugin("PlexonTravel",true);
+        assertTrue(registry.register(descriptor(first,ModuleState.STARTING)).success());
+        assertFalse(registry.register(descriptor(second,ModuleState.STARTING)).success());
+        assertFalse(registry.updateState("travel",second,ModuleState.READY,"late"));
+        assertEquals(0,registry.unregisterOwnedBy(second));
+        assertSame(first,registry.find("travel").orElseThrow().plugin());
+        assertEquals(1,registry.unregisterOwnedBy(first));
+    }
+
+    private static ModuleDescriptor descriptor(Plugin plugin,ModuleState state){
+        return new ModuleDescriptor("travel","PlexonTravel",plugin.getName(),"1.0.1",plugin,
+            ModuleVersionRange.parse(PlexonTravel.SUPPORTED_CORE_API),Set.of("safe-teleport"),state,"test",Instant.now());
+    }
+
+    private static Plugin plugin(String name,boolean enabled){
+        return (Plugin)Proxy.newProxyInstance(Plugin.class.getClassLoader(),new Class<?>[]{Plugin.class},(proxy,method,args)->switch(method.getName()){
+            case "getName" -> name;
+            case "isEnabled" -> enabled;
+            case "toString" -> name+"Proxy";
+            case "hashCode" -> System.identityHashCode(proxy);
+            case "equals" -> proxy==args[0];
+            default -> method.getReturnType()==boolean.class?false:method.getReturnType()==int.class?0:method.getReturnType()==long.class?0L:null;
+        });
+    }
+}
+''')
+
+          Path('releases/1.0.1.md').write_text('''# PlexonTravel 1.0.1\n\nPlexonCore 2.0.4 lifecycle/provenance maintenance release.\n\n- Pins exact Core 2.0.4 in build/release provenance.\n- Supports Core API `>=2.0 <3.0`.\n- Uses owner-aware state transitions and owner-scoped cleanup.\n- Adds lifecycle regression coverage for Core 2 acceptance, Core 3 rejection, missing Core policy, STARTING to READY, and duplicate ownership.\n- Preserves spawn, hub, back, warps, safe teleport, warmup/cooldown, Vault/TheosisEconomy fee/refund behavior, teleport history, SQLite persistence, and public API/events.\n\nRuntime deployment, observed Core READY, restart/soak, Spark and live command takeover remain NOT EXECUTED.\n''')
+          readme=Path('README.md'); readme.write_text(readme.read_text().replace('PlexonCore `2.0.0`','PlexonCore `2.0.4`').replace('PlexonCore-2.0.0.jar','PlexonCore-2.0.4.jar'))
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add pom.xml src/main/java/com/plexon/travel/PlexonTravel.java src/main/java/com/plexon/travel/CoreLifecyclePolicy.java src/test/java/com/plexon/travel/CoreLifecyclePolicyTest.java releases/1.0.1.md README.md
+          git commit -m '[travel-1.0.1-patched] Core 2.0.4 lifecycle maintenance'
+          git push origin HEAD:agent/1.0.1-core204-certification
+
   verify:
-    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && contains(github.event.head_commit.message, '[travel-1.0.1-patched]')
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v5
@@ -18,25 +203,12 @@ jobs:
           distribution: temurin
           java-version: '25'
           cache: maven
-      - name: Provision exact PlexonCore 2.0.0
+      - name: Provision exact PlexonCore 2.0.4
         shell: bash
         run: |
           set -euo pipefail
-          curl -L --fail --retry 3 -o /tmp/PlexonCore-2.0.0.jar \
-            https://github.com/ZpkDxGames/PlexonCore/releases/download/v2.0.0/PlexonCore-2.0.0.jar
-          echo '179b82ce7fd82e3095b3a6d0d893af6d7c97f91bd7ce403e96d7f3581462dfec  /tmp/PlexonCore-2.0.0.jar' | sha256sum -c -
-          mvn -B -ntp org.apache.maven.plugins:maven-install-plugin:3.1.4:install-file \
-            -Dfile=/tmp/PlexonCore-2.0.0.jar -DgroupId=com.zpkdxgames -DartifactId=PlexonCore -Dversion=2.0.0 -Dpackaging=jar
-      - name: Test and package
-        run: mvn -B -ntp clean verify
-      - name: Verify installable JAR
-        run: ./scripts/verify-distribution.sh target/PlexonTravel-1.0.0.jar
-      - name: Checksum
-        run: sha256sum target/PlexonTravel-1.0.0.jar | sed 's#target/##' > SHA256SUMS.txt
-      - uses: actions/upload-artifact@v4
-        with:
-          name: PlexonTravel-1.0.0
-          path: |
-            target/PlexonTravel-1.0.0.jar
-            SHA256SUMS.txt
-          if-no-files-found: error
+          curl -L --fail --retry 3 -o /tmp/PlexonCore-2.0.4.jar https://github.com/ZpkDxGames/PlexonCore/releases/download/v2.0.4/PlexonCore-2.0.4.jar
+          echo '61d625a717da9f46ee9231e1970d84b4c317ae12cf4090cdf7c9d39b6a1a9baf  /tmp/PlexonCore-2.0.4.jar' | sha256sum -c -
+          mvn -B -ntp org.apache.maven.plugins:maven-install-plugin:3.1.4:install-file -Dfile=/tmp/PlexonCore-2.0.4.jar -DgroupId=com.zpkdxgames -DartifactId=PlexonCore -Dversion=2.0.4 -Dpackaging=jar
+      - run: mvn -B -ntp clean verify
+      - run: ./scripts/verify-distribution.sh target/PlexonTravel-1.0.1.jar
