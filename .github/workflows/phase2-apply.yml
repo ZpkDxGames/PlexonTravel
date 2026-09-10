@@ -20,7 +20,11 @@ jobs:
         run: |
           python3 scripts/apply-phase2-2.0.0.py
           chmod +x scripts/verify-distribution.sh
-      - name: Commit exact candidate source
+          # The Actions token cannot modify workflow files. Keep workflow changes
+          # out of this source commit; they are installed separately through the
+          # authenticated GitHub repository connection after source application.
+          git checkout HEAD -- .github/workflows/build.yml .github/workflows/release.yml .github/workflows/phase2-apply.yml
+      - name: Commit candidate source
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
