@@ -43,8 +43,8 @@ commands:
     usage: /delwarp <name>
     permission: plexontravel.admin.warps
   renamewarp:
-    description: Rename a warp.
-    usage: /renamewarp <old> <new>
+    description: Update a warp display name without changing its stable ID.
+    usage: /renamewarp <id> <display name...>
     permission: plexontravel.admin.warps
   ptravel:
     description: Staging-safe travel command namespace.

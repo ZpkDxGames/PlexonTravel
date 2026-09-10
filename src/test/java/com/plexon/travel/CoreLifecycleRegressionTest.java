@@ -60,7 +60,7 @@ class CoreLifecycleRegressionTest {
 
     private static ModuleDescriptor descriptor(Plugin plugin, ModuleState state) {
         return new ModuleDescriptor(
-            "travel", "PlexonTravel", plugin.getName(), "1.0.1", plugin, SUPPORTED,
+            "travel", "PlexonTravel", plugin.getName(), "2.0.0-rc.1", plugin, SUPPORTED,
             Set.of("safe-teleport"), state, "test", Instant.now());
     }
 

@@ -51,3 +51,8 @@ migration:
   claim-standard-commands: false
   # Execute is intentionally gated separately from scan/plan/status.
   allow-execute: false
+
+# Phase 2 reload is transactional: malformed candidate values are rejected and the prior runtime config remains active.
+# Supported cooldowns.mode: PER_TYPE, GLOBAL
+# Supported hub.mode: SEPARATE, SPAWN, DISABLED
+# Supported respawn.mode: VANILLA, SPAWN, HUB, LAST_BED_OR_SPAWN

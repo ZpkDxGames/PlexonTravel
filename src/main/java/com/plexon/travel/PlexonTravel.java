@@ -13,6 +13,10 @@ import com.plexon.travel.event.PlexonTravelStartEvent;
 import com.plexon.travel.event.PlexonWarpCreatedEvent;
 import com.plexon.travel.event.PlexonWarpDeletedEvent;
 import com.plexon.travel.event.PlexonWarpUpdatedEvent;
+import com.plexon.travel.internal.AttemptLedger;
+import com.plexon.travel.internal.DestructiveConfirmationGate;
+import com.plexon.travel.internal.TravelConfigValidator;
+import com.plexon.travel.papi.PlexonTravelExpansion;
 import com.zpkdxgames.plexoncore.api.PlexonCoreAPI;
 import com.zpkdxgames.plexoncore.module.ModuleRegistry;
 import com.zpkdxgames.plexoncore.module.ModuleRegistry.ModuleDescriptor;
@@ -116,6 +120,13 @@ public final class PlexonTravel extends JavaPlugin implements Listener {
         saveResourceIfAbsent("gui.yml");
         saveResourceIfAbsent("migration.yml");
 
+        List<String> startupConfigErrors = TravelConfigValidator.validate(getConfig());
+        if (!startupConfigErrors.isEmpty()) {
+            getLogger().severe("Invalid PlexonTravel configuration: " + String.join("; ", startupConfigErrors));
+            getServer().getPluginManager().disablePlugin(this);
+            return;
+        }
+
         RegisteredServiceProvider<PlexonCoreAPI> coreRegistration = getServer().getServicesManager().getRegistration(PlexonCoreAPI.class);
         if (coreRegistration == null || coreRegistration.getProvider() == null) {
             getLogger().severe("PlexonCore API service is unavailable; PlexonTravel cannot start.");
@@ -166,6 +177,14 @@ public final class PlexonTravel extends JavaPlugin implements Listener {
         commands = new TravelCommands();
         publicApi = new PublicApi();
         getServer().getServicesManager().register(PlexonTravelAPI.class, publicApi, this, ServicePriority.Normal);
+        if (getServer().getPluginManager().isPluginEnabled("PlaceholderAPI")) {
+            try {
+                new PlexonTravelExpansion(this, publicApi).register();
+                getLogger().info("PlaceholderAPI expansion registered.");
+            } catch (Throwable failure) {
+                getLogger().log(Level.WARNING, "PlaceholderAPI expansion registration failed", failure);
+            }
+        }
         getServer().getPluginManager().registerEvents(this, this);
         getServer().getPluginManager().registerEvents(warpGui, this);
         registerCommands();
@@ -309,6 +328,7 @@ public final class PlexonTravel extends JavaPlugin implements Listener {
 
     private final class TravelService {
         private final Map<UUID, Pending> pending = new ConcurrentHashMap<>();
+        private final AttemptLedger attempts = new AttemptLedger();
         private final Map<UUID, EnumMap<TravelType, Long>> cooldowns = new HashMap<>();
         private final Set<UUID> internalTeleports = new HashSet<>();
         private final SafeResolver safeResolver = new SafeResolver();
@@ -326,26 +346,38 @@ public final class PlexonTravel extends JavaPlugin implements Listener {
             CompletableFuture<Boolean> result = new CompletableFuture<>();
             if (!player.isOnline()) { result.complete(false); return result; }
             if (!cooldownReady(player, type, policy.cooldownSeconds())) { result.complete(false); return result; }
+            UUID playerId = player.getUniqueId();
+            long attemptId = attempts.acquire(playerId);
+            if (attemptId == 0L) {
+                tell(player, "A teleport is already pending or in progress.");
+                result.complete(false);
+                return result;
+            }
+            long requestEpoch = runtimeEpoch;
             safeResolver.resolve(destination).whenComplete((safe, error) -> Bukkit.getScheduler().runTask(PlexonTravel.this,
-                () -> beginResolved(player, type, destination, sourceId, policy, safe, error, result)));
+                () -> beginResolved(player, type, destination, sourceId, policy, safe, error, attemptId, requestEpoch, result)));
             return result;
         }
 
         private void beginResolved(Player player, TravelType type, Destination destination, String sourceId, Policy policy,
-                                   Location safe, Throwable error, CompletableFuture<Boolean> result) {
-            if (!player.isOnline()) { result.complete(false); return; }
+                                   Location safe, Throwable error, long attemptId, long requestEpoch, CompletableFuture<Boolean> result) {
+            UUID playerId = player.getUniqueId();
+            if (!attempts.owns(playerId, attemptId) || requestEpoch != runtimeEpoch) {
+                attempts.release(playerId, attemptId);
+                result.complete(false);
+                return;
+            }
+            if (!player.isOnline()) { attempts.release(playerId, attemptId); result.complete(false); return; }
             if (error != null || safe == null) {
                 unsafeRejected.increment();
+                attempts.release(playerId, attemptId);
                 tell(player, "No safe destination is available.");
                 result.complete(false);
                 return;
             }
             PlexonTravelStartEvent start = new PlexonTravelStartEvent(player, type, destination.view(), sourceId);
             fire(start);
-            if (start.isCancelled()) { result.complete(false); return; }
-
-            Pending old = pending.remove(player.getUniqueId());
-            if (old != null) finishCancelled(old, CancelReason.REPLACED);
+            if (start.isCancelled()) { attempts.release(playerId, attemptId); result.complete(false); return; }
 
             long now = System.nanoTime();
             long duration = TimeUnit.SECONDS.toNanos(policy.warmupSeconds());
@@ -356,11 +388,14 @@ public final class PlexonTravel extends JavaPlugin implements Listener {
                 bar.addPlayer(player);
             }
             Location origin = player.getLocation();
-            Pending created = new Pending(player, type, destination, sourceId, policy, origin, now, now + duration, runtimeEpoch, result, bar);
-            pending.put(player.getUniqueId(), created);
+            Pending created = new Pending(player, type, destination, sourceId, policy, origin, now, now + duration, requestEpoch, attemptId, result, bar);
+            pending.put(playerId, created);
             started.increment();
             if (duration == 0) execute(created);
-            else tell(player, "Teleporting in " + policy.warmupSeconds() + "s. Move or take damage to cancel.");
+            else {
+                String feeText = policy.fee() > 0D && !player.hasPermission("plexontravel.fee.bypass") ? String.format(Locale.ROOT, " Fee: %.2f.", policy.fee()) : "";
+                tell(player, "Teleporting in " + policy.warmupSeconds() + "s." + feeText + " Move or take damage to cancel.");
+            }
         }
 
         private boolean cooldownReady(Player player, TravelType type, int seconds) {
@@ -388,8 +423,8 @@ public final class PlexonTravel extends JavaPlugin implements Listener {
         void tick() {
             long now = System.nanoTime();
             for (Pending value : pending.values()) {
-                if (value.epoch != runtimeEpoch) { cancel(value.player.getUniqueId(), CancelReason.REPLACED); continue; }
                 if (value.executing) continue;
+                if (value.epoch != runtimeEpoch) { cancel(value.player.getUniqueId(), CancelReason.REPLACED); continue; }
                 if (now >= value.deadlineNanos) { execute(value); continue; }
                 if (value.bar != null) {
                     double total = Math.max(1D, value.deadlineNanos - value.startedNanos);
@@ -415,8 +450,11 @@ public final class PlexonTravel extends JavaPlugin implements Listener {
         }
 
         boolean cancel(UUID id, CancelReason reason) {
-            Pending value = pending.remove(id);
-            if (value == null) return false;
+            Pending value = pending.get(id);
+            if (value == null) return attempts.releaseCurrent(id);
+            if (value.executing) return false;
+            if (!pending.remove(id, value)) return false;
+            attempts.release(id, value.attemptId);
             if (reason == CancelReason.DAMAGED) damageCancelled.increment();
             finishCancelled(value, reason);
             return true;
@@ -438,23 +476,27 @@ public final class PlexonTravel extends JavaPlugin implements Listener {
                 if (error != null || safe == null) {
                     unsafeRejected.increment();
                     pending.remove(value.player.getUniqueId(), value);
+                    attempts.release(value.player.getUniqueId(), value.attemptId);
                     finishCancelled(value, CancelReason.DESTINATION_UNSAFE);
                     return;
                 }
                 double fee = value.player.hasPermission("plexontravel.fee.bypass") ? 0D : value.policy.fee();
                 if (fee > 0D && !economy.withdraw(value.player, fee)) {
                     pending.remove(value.player.getUniqueId(), value);
+                    attempts.release(value.player.getUniqueId(), value.attemptId);
                     finishCancelled(value, CancelReason.ECONOMY);
                     tell(value.player, "Unable to charge the teleport fee.");
                     return;
                 }
+                value.chargedFee = fee;
                 UUID id = value.player.getUniqueId();
                 internalTeleports.add(id);
                 value.player.teleportAsync(safe, PlayerTeleportEvent.TeleportCause.PLUGIN).whenComplete((success, teleportError) ->
                     Bukkit.getScheduler().runTask(PlexonTravel.this, () -> {
                         internalTeleports.remove(id);
-                        if (pending.get(id) != value) return;
+                        if (pending.get(id) != value || !attempts.owns(id, value.attemptId)) return;
                         pending.remove(id, value);
+                        attempts.release(id, value.attemptId);
                         if (value.bar != null) value.bar.removeAll();
                         if (Boolean.TRUE.equals(success) && teleportError == null) {
                             setBack(id, value.origin, "travel:" + value.type.name().toLowerCase(Locale.ROOT));
@@ -464,7 +506,7 @@ public final class PlexonTravel extends JavaPlugin implements Listener {
                             tell(value.player, "Teleport complete.");
                             value.result.complete(true);
                         } else {
-                            if (fee > 0D) economy.deposit(value.player, fee);
+                            refundOnce(value);
                             fire(new PlexonTravelCancelledEvent(value.player, value.type, CancelReason.OTHER, value.sourceId));
                             tell(value.player, "Teleport failed; any fee was refunded.");
                             value.result.complete(false);
@@ -483,8 +525,14 @@ public final class PlexonTravel extends JavaPlugin implements Listener {
             }));
         }
 
+        private void refundOnce(Pending value) {
+            if (value.refunded || value.chargedFee <= 0D) return;
+            value.refunded = true;
+            economy.deposit(value.player, value.chargedFee);
+        }
+
         boolean isInternal(UUID id) { return internalTeleports.contains(id); }
-        boolean isPending(UUID id) { return pending.containsKey(id); }
+        boolean isPending(UUID id) { return attempts.isActive(id); }
 
         TravelStatusView status(UUID id) {
             Pending value = pending.get(id);
@@ -492,9 +540,21 @@ public final class PlexonTravel extends JavaPlugin implements Listener {
             return new TravelStatusView(true, value.type, value.sourceId, Math.max(0L, TimeUnit.NANOSECONDS.toMillis(value.deadlineNanos - System.nanoTime())));
         }
 
+        void invalidateWarmupsForReload() {
+            for (Pending value : List.copyOf(pending.values())) if (!value.executing) cancel(value.player.getUniqueId(), CancelReason.REPLACED);
+        }
+
         void shutdown() {
             if (ticker != null) ticker.cancel();
-            for (UUID id : List.copyOf(pending.keySet())) cancel(id, CancelReason.PLUGIN_DISABLED);
+            for (Pending value : List.copyOf(pending.values())) {
+                if (value.executing) {
+                    refundOnce(value);
+                    if (value.bar != null) value.bar.removeAll();
+                    if (!value.result.isDone()) value.result.complete(false);
+                } else cancel(value.player.getUniqueId(), CancelReason.PLUGIN_DISABLED);
+            }
+            pending.clear();
+            attempts.clear();
             internalTeleports.clear();
         }
     }
@@ -600,7 +660,6 @@ public final class PlexonTravel extends JavaPlugin implements Listener {
         void open(Player player, int requestedPage) {
             List<Warp> available = warps.values().stream()
                 .filter(Warp::enabled)
-                .filter(w -> w.permission().isBlank() || player.hasPermission(w.permission()) || !w.permissionRequired())
                 .sorted(Comparator.comparingInt(Warp::sortOrder).thenComparing(Warp::id))
                 .toList();
             int pages = Math.max(1, (available.size() + 44) / 45);
@@ -616,9 +675,12 @@ public final class PlexonTravel extends JavaPlugin implements Listener {
                 ItemMeta meta = item.getItemMeta();
                 meta.setDisplayName("§b" + warp.displayName());
                 List<String> lore = new ArrayList<>();
+                boolean locked = warp.permissionRequired() && !warp.permission().isBlank() && !player.hasPermission(warp.permission());
+                double fee = player.hasPermission("plexontravel.fee.bypass") ? 0D : policy(TravelType.WARP, -1D).fee();
                 lore.add("§7" + warp.category());
                 lore.add("§8World: " + warp.destination().worldName());
-                lore.add("§aClick to travel");
+                lore.add(fee > 0D ? String.format(Locale.ROOT, "§6Fee: %.2f", fee) : "§aFree travel");
+                lore.add(locked ? "§cLocked: " + warp.permission() : "§aClick to travel");
                 meta.setLore(lore);
                 meta.getPersistentDataContainer().set(warpKey, PersistentDataType.STRING, warp.id());
                 item.setItemMeta(meta);
@@ -648,12 +710,15 @@ public final class PlexonTravel extends JavaPlugin implements Listener {
             if (id == null) return;
             Warp warp = warps.get(id);
             if (warp == null || !warp.enabled()) { tell(player, "Warp is no longer available."); player.closeInventory(); return; }
+            if (warp.permissionRequired() && !warp.permission().isBlank() && !player.hasPermission(warp.permission())) { tell(player, "You cannot use that warp."); return; }
             player.closeInventory();
             request(player, TravelType.WARP, warp.destination(), "warp:" + warp.id(), -1D);
         }
     }
 
     private final class TravelCommands implements CommandExecutor, TabCompleter {
+        private final DestructiveConfirmationGate deleteGate = new DestructiveConfirmationGate(15_000L);
+
         @Override
         public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
             String name = command.getName().toLowerCase(Locale.ROOT);
@@ -723,22 +788,39 @@ public final class PlexonTravel extends JavaPlugin implements Listener {
 
         private boolean deleteWarp(CommandSender sender, String[] args) {
             if (!sender.hasPermission("plexontravel.admin.warps")) { tell(sender, "No permission."); return true; }
-            if (args.length < 1) { tell(sender, "Usage: /delwarp <name>"); return true; }
-            Warp removed = warps.remove(normalizeId(args[0]));
-            if (removed == null) { tell(sender, "Warp not found."); return true; }
-            storage.deleteWarpAsync(removed.id()); fire(new PlexonWarpDeletedEvent(removed.view())); tell(sender, "Warp deleted."); return true;
+            if (args.length < 1) { tell(sender, "Usage: /delwarp <id>"); return true; }
+            String id = normalizeId(args[0]);
+            Warp current = warps.get(id);
+            if (current == null) { tell(sender, "Warp not found."); return true; }
+            String actor = sender instanceof Player player ? "player:" + player.getUniqueId() : "sender:" + sender.getName().toLowerCase(Locale.ROOT);
+            DestructiveConfirmationGate.Decision decision = deleteGate.check(actor, "delete-warp", id, current.revision(), System.currentTimeMillis());
+            if (decision == DestructiveConfirmationGate.Decision.ARMED) {
+                tell(sender, "Run /delwarp " + id + " again within 15s to confirm deletion of revision " + current.revision() + ".");
+                return true;
+            }
+            if (!warps.remove(id, current)) { tell(sender, "Warp changed before deletion; confirmation invalidated."); return true; }
+            deleteGate.invalidate("delete-warp", id);
+            storage.deleteWarpAsync(current.id());
+            fire(new PlexonWarpDeletedEvent(current.view()));
+            tell(sender, "Warp '" + id + "' deleted.");
+            return true;
         }
 
         private boolean renameWarp(CommandSender sender, String[] args) {
             if (!sender.hasPermission("plexontravel.admin.warps")) { tell(sender, "No permission."); return true; }
-            if (args.length < 2) { tell(sender, "Usage: /renamewarp <old> <new>"); return true; }
-            String oldId = normalizeId(args[0]), newId = normalizeId(args[1]);
-            Warp old = warps.get(oldId);
-            if (old == null || newId.isBlank() || warps.containsKey(newId)) { tell(sender, "Rename cannot be completed."); return true; }
-            Warp renamed = new Warp(newId, args[1], old.destination(), old.enabled(), "plexontravel.warp." + newId,
+            if (args.length < 2) { tell(sender, "Usage: /renamewarp <id> <display name...>"); return true; }
+            String id = normalizeId(args[0]);
+            Warp old = warps.get(id);
+            String displayName = String.join(" ", java.util.Arrays.copyOfRange(args, 1, args.length)).trim();
+            if (old == null || displayName.isBlank() || displayName.length() > 80) { tell(sender, "Rename cannot be completed."); return true; }
+            Warp renamed = new Warp(old.id(), displayName, old.destination(), old.enabled(), old.permission(),
                 old.permissionRequired(), old.sortOrder(), old.icon(), old.category(), old.revision() + 1L);
-            warps.remove(oldId); warps.put(newId, renamed); storage.deleteWarpAsync(oldId); storage.saveWarpAsync(renamed);
-            fire(new PlexonWarpUpdatedEvent(old.view(), renamed.view())); tell(sender, "Warp renamed to '" + newId + "'."); return true;
+            warps.put(id, renamed);
+            deleteGate.invalidate("delete-warp", id);
+            storage.saveWarpAsync(renamed);
+            fire(new PlexonWarpUpdatedEvent(old.view(), renamed.view()));
+            tell(sender, "Warp display name updated; stable ID remains '" + id + "'.");
+            return true;
         }
 
         private boolean ptravel(CommandSender sender, String[] args) {
@@ -759,7 +841,7 @@ public final class PlexonTravel extends JavaPlugin implements Listener {
             if (!sender.hasPermission("plexontravel.admin")) { tell(sender, "No permission."); return true; }
             if (args.length == 0) { tell(sender, "Usage: /traveladmin <reload|diagnostics|backup|migrate>"); return true; }
             return switch (args[0].toLowerCase(Locale.ROOT)) {
-                case "reload" -> { reloadConfig(); runtimeEpoch++; tell(sender, "Configuration reloaded; new requests use epoch " + runtimeEpoch + "."); yield true; }
+                case "reload" -> { reloadValidated(sender); yield true; }
                 case "diagnostics" -> { diagnostics(sender); yield true; }
                 case "backup" -> { backup(sender); yield true; }
                 case "migrate" -> { migrate(sender, java.util.Arrays.copyOfRange(args, 1, args.length)); yield true; }
@@ -769,10 +851,24 @@ public final class PlexonTravel extends JavaPlugin implements Listener {
             };
         }
 
+        private void reloadValidated(CommandSender sender) {
+            File file = new File(getDataFolder(), "config.yml");
+            YamlConfiguration candidate = YamlConfiguration.loadConfiguration(file);
+            List<String> errors = TravelConfigValidator.validate(candidate);
+            if (!errors.isEmpty()) {
+                tell(sender, "Reload rejected; previous known-good configuration retained: " + String.join("; ", errors));
+                return;
+            }
+            reloadConfig();
+            runtimeEpoch++;
+            travel.invalidateWarmupsForReload();
+            tell(sender, "Configuration validated and atomically activated; runtime epoch " + runtimeEpoch + ".");
+        }
+
         private void diagnostics(CommandSender sender) {
             tell(sender, "Core " + core.version().pluginVersion() + " / API " + core.version().apiVersion());
             tell(sender, "spawn=" + (spawn.get() != null) + ", hubMode=" + getConfig().getString("hub.mode", "SEPARATE") + ", warps=" + warps.size());
-            tell(sender, "pending=" + travel.pending.size() + ", started=" + travel.started.sum() + ", complete=" + travel.completed.sum());
+            tell(sender, "pending=" + travel.attempts.size() + ", started=" + travel.started.sum() + ", complete=" + travel.completed.sum());
             tell(sender, "cancelled[moved=" + travel.movementCancelled.sum() + ", damage=" + travel.damageCancelled.sum() + ", unsafe=" + travel.unsafeRejected.sum() + "]");
             tell(sender, "backCached=" + back.size() + ", standardCommands=" + standardCommandsEnabled() + ", runtimeEpoch=" + runtimeEpoch);
         }
@@ -901,12 +997,12 @@ public final class PlexonTravel extends JavaPlugin implements Listener {
 
     private static final class Pending {
         final Player player; final TravelType type; final Destination destination; final String sourceId; final Policy policy;
-        final Location origin; final long startedNanos; final long deadlineNanos; final long epoch; final CompletableFuture<Boolean> result; final BossBar bar;
-        boolean executing;
+        final Location origin; final long startedNanos; final long deadlineNanos; final long epoch; final long attemptId; final CompletableFuture<Boolean> result; final BossBar bar;
+        boolean executing; double chargedFee; boolean refunded;
         Pending(Player player, TravelType type, Destination destination, String sourceId, Policy policy, Location origin,
-                long startedNanos, long deadlineNanos, long epoch, CompletableFuture<Boolean> result, BossBar bar) {
+                long startedNanos, long deadlineNanos, long epoch, long attemptId, CompletableFuture<Boolean> result, BossBar bar) {
             this.player = player; this.type = type; this.destination = destination; this.sourceId = sourceId; this.policy = policy;
-            this.origin = origin; this.startedNanos = startedNanos; this.deadlineNanos = deadlineNanos; this.epoch = epoch; this.result = result; this.bar = bar;
+            this.origin = origin; this.startedNanos = startedNanos; this.deadlineNanos = deadlineNanos; this.epoch = epoch; this.attemptId = attemptId; this.result = result; this.bar = bar;
         }
     }
 
