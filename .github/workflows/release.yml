@@ -8,6 +8,7 @@ on:
 permissions:
   contents: write
   actions: read
+  pull-requests: read
 
 jobs:
   freeze:
@@ -22,19 +23,20 @@ jobs:
           set -euo pipefail
           SHA="$GITHUB_SHA"
           TAG='v2.0.0-rc.1'
+          REPO="$GITHUB_REPOSITORY"
 
-          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" >/dev/null 2>&1; then
+          if gh api "repos/$REPO/git/ref/tags/$TAG" >/dev/null 2>&1; then
             echo "$TAG already exists; refusing to move or replace it." >&2
             exit 1
           fi
 
-          if gh release view "$TAG" >/dev/null 2>&1; then
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
             echo "$TAG release already exists; refusing to replace it." >&2
             exit 1
           fi
 
           for attempt in $(seq 1 90); do
-            JSON="$(gh run list --workflow Build --commit "$SHA" --limit 20 --json databaseId,event,status,conclusion,headSha)"
+            JSON="$(gh run list --repo "$REPO" --workflow Build --commit "$SHA" --limit 20 --json databaseId,event,status,conclusion,headSha)"
             if echo "$JSON" | jq -e '.[] | select(.event == "push" and .conclusion != null and .conclusion != "success")' >/dev/null; then
               echo 'Exact-head source CI failed.' >&2
               echo "$JSON"
@@ -58,14 +60,14 @@ jobs:
             sleep 5
           done
 
-          PR_JSON="$(gh pr list --state open --head phase2/2.0.0-premium-travel --json number,isDraft,headRefOid --limit 5)"
+          PR_JSON="$(gh pr list --repo "$REPO" --state open --head phase2/2.0.0-premium-travel --json number,isDraft,headRefOid --limit 5)"
           echo "$PR_JSON" | jq -e --arg sha "$SHA" 'length == 1 and .[0].isDraft == true and .[0].headRefOid == $sha' >/dev/null || {
             echo 'Expected exactly one OPEN / DRAFT PR at the exact candidate SHA.' >&2
             echo "$PR_JSON"
             exit 1
           }
 
-          gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$TAG" -f sha="$SHA"
+          gh api --method POST "repos/$REPO/git/refs" -f ref="refs/tags/$TAG" -f sha="$SHA"
 
   release:
     if: ${{ github.ref == 'refs/tags/v2.0.0-rc.1' }}
@@ -76,7 +78,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh release view v2.0.0-rc.1 >/dev/null 2>&1; then
+          if gh release view v2.0.0-rc.1 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo 'v2.0.0-rc.1 already exists; refusing to replace release assets.' >&2
             exit 1
           fi
@@ -131,6 +133,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create v2.0.0-rc.1 target/PlexonTravel-2.0.0-rc.1.jar SHA256SUMS.txt TEST_SUMMARY.txt PROVENANCE.txt \
+            --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
             --title 'PlexonTravel 2.0.0-rc.1' \
             --notes-file releases/2.0.0-rc.1.md \
