@@ -2,13 +2,73 @@ name: Release 2.0.0-rc.1
 
 on:
   push:
+    branches: [phase2/2.0.0-premium-travel]
     tags: ['v2.0.0-rc.1']
 
 permissions:
   contents: write
+  actions: read
 
 jobs:
+  freeze:
+    if: ${{ github.ref == 'refs/heads/phase2/2.0.0-premium-travel' && contains(github.event.head_commit.message, '[freeze-rc]') }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require exact-head branch and PR CI before tagging
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          SHA="$GITHUB_SHA"
+          TAG='v2.0.0-rc.1'
+
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" >/dev/null 2>&1; then
+            echo "$TAG already exists; refusing to move or replace it." >&2
+            exit 1
+          fi
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "$TAG release already exists; refusing to replace it." >&2
+            exit 1
+          fi
+
+          for attempt in $(seq 1 90); do
+            JSON="$(gh run list --workflow Build --commit "$SHA" --limit 20 --json databaseId,event,status,conclusion,headSha)"
+            if echo "$JSON" | jq -e '.[] | select(.event == "push" and .conclusion != null and .conclusion != "success")' >/dev/null; then
+              echo 'Exact-head source CI failed.' >&2
+              echo "$JSON"
+              exit 1
+            fi
+            if echo "$JSON" | jq -e '.[] | select(.event == "pull_request" and .conclusion != null and .conclusion != "success")' >/dev/null; then
+              echo 'Exact-head PR CI failed.' >&2
+              echo "$JSON"
+              exit 1
+            fi
+            PUSH_OK=false
+            PR_OK=false
+            if echo "$JSON" | jq -e '.[] | select(.event == "push" and .status == "completed" and .conclusion == "success")' >/dev/null; then PUSH_OK=true; fi
+            if echo "$JSON" | jq -e '.[] | select(.event == "pull_request" and .status == "completed" and .conclusion == "success")' >/dev/null; then PR_OK=true; fi
+            if [[ "$PUSH_OK" == true && "$PR_OK" == true ]]; then break; fi
+            if [[ "$attempt" == 90 ]]; then
+              echo 'Timed out waiting for exact-head source + PR CI.' >&2
+              echo "$JSON"
+              exit 1
+            fi
+            sleep 5
+          done
+
+          PR_JSON="$(gh pr list --state open --head phase2/2.0.0-premium-travel --json number,isDraft,headRefOid --limit 5)"
+          echo "$PR_JSON" | jq -e --arg sha "$SHA" 'length == 1 and .[0].isDraft == true and .[0].headRefOid == $sha' >/dev/null || {
+            echo 'Expected exactly one OPEN / DRAFT PR at the exact candidate SHA.' >&2
+            echo "$PR_JSON"
+            exit 1
+          }
+
+          gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$TAG" -f sha="$SHA"
+
   release:
+    if: ${{ github.ref == 'refs/tags/v2.0.0-rc.1' }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
