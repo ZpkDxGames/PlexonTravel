@@ -37,12 +37,12 @@ jobs:
 
           for attempt in $(seq 1 90); do
             JSON="$(gh run list --repo "$REPO" --workflow Build --commit "$SHA" --limit 20 --json databaseId,event,status,conclusion,headSha)"
-            if echo "$JSON" | jq -e '.[] | select(.event == "push" and .conclusion != null and .conclusion != "success")' >/dev/null; then
+            if echo "$JSON" | jq -e '.[] | select(.event == "push" and .status == "completed" and .conclusion != "success")' >/dev/null; then
               echo 'Exact-head source CI failed.' >&2
               echo "$JSON"
               exit 1
             fi
-            if echo "$JSON" | jq -e '.[] | select(.event == "pull_request" and .conclusion != null and .conclusion != "success")' >/dev/null; then
+            if echo "$JSON" | jq -e '.[] | select(.event == "pull_request" and .status == "completed" and .conclusion != "success")' >/dev/null; then
               echo 'Exact-head PR CI failed.' >&2
               echo "$JSON"
               exit 1
