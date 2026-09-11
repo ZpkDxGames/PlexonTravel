@@ -16,5 +16,5 @@ class Phase2SourceContractTest {
     @Test void deletionUsesBoundedRevisionConfirmation() throws Exception { assertTrue(source().contains("deleteGate.check(actor, \"delete-warp\", id, current.revision()")); }
     @Test void reloadValidatesCandidateBeforeBukkitReload() throws Exception { String s=source(); int m=s.indexOf("private void reloadValidated"); String r=s.substring(m, Math.min(s.length(), m+1000)); assertTrue(r.indexOf("TravelConfigValidator.validate(candidate)") < r.indexOf("reloadConfig()")); }
     @Test void placeholderExpansionIsCachedApiOnly() throws Exception { String p=Files.readString(Path.of("src/main/java/com/plexon/travel/papi/PlexonTravelExpansion.java")); assertFalse(p.contains("java.sql")); assertFalse(p.contains("Files.")); assertTrue(p.contains("api.warps().size()")); }
-    @Test void candidateVersionIsRc1() throws Exception { assertTrue(Files.readString(Path.of("pom.xml")).contains("<version>2.0.0-rc.1</version>")); }
+    @Test void stableVersionIs200() throws Exception { assertTrue(Files.readString(Path.of("pom.xml")).contains("<version>2.0.0</version>")); }
 }
