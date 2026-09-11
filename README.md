@@ -1,6 +1,6 @@
 # PlexonTravel
 
-PlexonTravel is the focused Core-native travel module for PlexonCraft.
+PlexonTravel is the focused Core-native travel module for PlexonCraft. Phase 2 candidate: `2.0.0-rc.1`.
 
 ## Platform
 
