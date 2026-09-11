@@ -1,6 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
-JAR="${1:-target/PlexonTravel-2.0.0-rc.1.jar}"
+if [[ $# -gt 0 ]]; then
+  JAR="$1"
+else
+  shopt -s nullglob
+  jars=(target/PlexonTravel-*.jar)
+  filtered=()
+  for jar in "${jars[@]}"; do
+    [[ "$jar" == *-sources.jar || "$jar" == *-javadoc.jar || "$jar" == *.original ]] || filtered+=("$jar")
+  done
+  [[ ${#filtered[@]} -eq 1 ]] || { echo "expected exactly one runtime PlexonTravel JAR, found ${#filtered[@]}" >&2; exit 1; }
+  JAR="${filtered[0]}"
+fi
 [[ -f "$JAR" ]] || { echo "missing jar: $JAR" >&2; exit 1; }
 LIST="$(mktemp)"
 trap 'rm -f "$LIST"' EXIT
