@@ -79,21 +79,10 @@ final class DestinationRegistry {
         };
     }
 
-    Destination legacySpawn() {
-        return legacySpawn.get();
-    }
-
-    Destination legacyHub() {
-        return legacyHub.get();
-    }
-
-    Destination worldSpawn(UUID worldId) {
-        return worldSpawns.get(worldId);
-    }
-
-    Destination worldHub(UUID worldId) {
-        return worldHubs.get(worldId);
-    }
+    Destination legacySpawn() { return legacySpawn.get(); }
+    Destination legacyHub() { return legacyHub.get(); }
+    Destination worldSpawn(UUID worldId) { return worldSpawns.get(worldId); }
+    Destination worldHub(UUID worldId) { return worldHubs.get(worldId); }
 
     void setWorldSpawn(World world, Location location) {
         Destination destination = Destination.from(location);
@@ -119,9 +108,7 @@ final class DestinationRegistry {
         storage.saveDestinationAsync("hub", destination);
     }
 
-    BackEntry back(UUID playerId) {
-        return back.get(playerId);
-    }
+    BackEntry back(UUID playerId) { return back.get(playerId); }
 
     void setBack(UUID playerId, Location location, String source) {
         if (location == null || location.getWorld() == null || !Destination.finite(location)) return;
@@ -130,20 +117,15 @@ final class DestinationRegistry {
         storage.saveBackAsync(playerId, entry);
     }
 
-    Warp warp(String id) {
-        return warps.get(normalizeId(id));
-    }
+    Warp warp(String id) { return warps.get(normalizeId(id)); }
 
     List<Warp> warps() {
-        return warps.values().stream()
-            .sorted(Comparator.comparingInt(Warp::sortOrder).thenComparing(Warp::id))
-            .toList();
+        return warps.values().stream().sorted(Comparator.comparingInt(Warp::sortOrder).thenComparing(Warp::id)).toList();
     }
 
     List<Warp> availableWarps() {
         return warps.values().stream().filter(Warp::enabled)
-            .sorted(Comparator.comparingInt(Warp::sortOrder).thenComparing(Warp::id))
-            .toList();
+            .sorted(Comparator.comparingInt(Warp::sortOrder).thenComparing(Warp::id)).toList();
     }
 
     Warp saveWarp(String requestedName, Location location) {
@@ -157,6 +139,16 @@ final class DestinationRegistry {
         warps.put(id, current);
         storage.saveWarpAsync(current);
         return current;
+    }
+
+    Warp importWarp(String requestedName, Destination destination, String category) {
+        String id = normalizeId(requestedName);
+        if (id.isBlank() || destination == null || !destination.finite() || warps.containsKey(id)) return null;
+        Warp warp = new Warp(id, requestedName, destination, true, "plexontravel.warp." + id, false,
+            warps.size(), "ENDER_PEARL", category == null || category.isBlank() ? "Imported" : category, 1L);
+        warps.put(id, warp);
+        storage.saveWarpAsync(warp);
+        return warp;
     }
 
     Warp renameWarp(String id, String displayName) {
@@ -176,21 +168,10 @@ final class DestinationRegistry {
         return true;
     }
 
-    int worldSpawnCount() {
-        return worldSpawns.size();
-    }
-
-    int worldHubCount() {
-        return worldHubs.size();
-    }
-
-    int warpCount() {
-        return warps.size();
-    }
-
-    int backCount() {
-        return back.size();
-    }
+    int worldSpawnCount() { return worldSpawns.size(); }
+    int worldHubCount() { return worldHubs.size(); }
+    int warpCount() { return warps.size(); }
+    int backCount() { return back.size(); }
 
     static String normalizeId(String input) {
         if (input == null) return "";
@@ -198,7 +179,5 @@ final class DestinationRegistry {
         return normalized.length() > 48 ? normalized.substring(0, 48) : normalized;
     }
 
-    List<String> warpIds() {
-        return new ArrayList<>(warps.keySet());
-    }
+    List<String> warpIds() { return new ArrayList<>(warps.keySet()); }
 }
