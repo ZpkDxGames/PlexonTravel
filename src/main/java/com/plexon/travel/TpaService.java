@@ -35,6 +35,10 @@ final class TpaService {
     }
 
     boolean send(Player requester, Player target, TpaMode mode) {
+        if (!requester.hasPermission("plexontravel.tpa")) {
+            messages.send(requester, "commands.no-permission", "<red>You do not have permission.</red>");
+            return false;
+        }
         if (!plugin.getConfig().getBoolean("tpa.enabled", true)) {
             messages.send(requester, "tpa.disabled", "<red>Teleport requests are disabled.</red>");
             return false;
@@ -98,7 +102,17 @@ final class TpaService {
         messages.send(target, "tpa.accepted", "<green>Teleport request accepted.</green>");
         messages.send(requester, "tpa.accepted-requester", "<green>{player}</green> <gray>accepted your teleport request.</gray>", Map.of("player", target.getName()));
         engine.request(mover, TravelType.TPA, Destination.from(anchor.getLocation()),
-            request.mode() == TpaMode.TO_TARGET ? "tpa:" + anchor.getUniqueId() : "tpahere:" + anchor.getUniqueId(), -1D);
+            request.mode() == TpaMode.TO_TARGET ? "tpa:" + anchor.getUniqueId() : "tpahere:" + anchor.getUniqueId(), -1D)
+            .whenComplete((success, failure) -> runSync(() -> {
+                if (failure == null && Boolean.TRUE.equals(success)) return;
+                if (mover.isOnline()) {
+                    messages.send(mover, "tpa.teleport-failed", "<yellow>The accepted teleport could not be completed.</yellow>");
+                }
+                Player other = mover.getUniqueId().equals(target.getUniqueId()) ? requester : target;
+                if (other.isOnline()) {
+                    messages.send(other, "tpa.teleport-failed-other", "<yellow>The accepted teleport could not be completed.</yellow>");
+                }
+            }));
         return true;
     }
 
@@ -135,7 +149,7 @@ final class TpaService {
         for (TpaRequest request : outgoing.values()) {
             if (!request.targetId().equals(target.getUniqueId())) continue;
             Player requester = Bukkit.getPlayer(request.requesterId());
-            if (requester != null && requester.isOnline()) names.add(requester.getName());
+            if (requester != null && requester.isOnline() && target.canSee(requester)) names.add(requester.getName());
         }
         names.sort(String::compareToIgnoreCase);
         return names;
@@ -155,11 +169,15 @@ final class TpaService {
         if (requesterName != null && !requesterName.isBlank()) {
             for (TpaRequest request : incoming) {
                 Player requester = Bukkit.getPlayer(request.requesterId());
-                if (requester != null && requester.getName().equalsIgnoreCase(requesterName)) return request;
+                if (requester != null && target.canSee(requester) && requester.getName().equalsIgnoreCase(requesterName)) return request;
             }
             messages.send(target, "tpa.not-found", "<red>No matching teleport request was found.</red>");
             return null;
         }
+        incoming = incoming.stream().filter(request -> {
+            Player requester = Bukkit.getPlayer(request.requesterId());
+            return requester != null && target.canSee(requester);
+        }).toList();
         if (incoming.isEmpty()) {
             messages.send(target, "tpa.none-incoming", "<yellow>You have no pending teleport requests.</yellow>");
             return null;
@@ -182,6 +200,12 @@ final class TpaService {
                 messages.send(requester, "tpa.expired", "<yellow>Your teleport request expired.</yellow>");
             }
         }
+    }
+
+    private void runSync(Runnable action) {
+        if (!plugin.isEnabled()) return;
+        if (Bukkit.isPrimaryThread()) action.run();
+        else Bukkit.getScheduler().runTask(plugin, action);
     }
 
     void shutdown() {
