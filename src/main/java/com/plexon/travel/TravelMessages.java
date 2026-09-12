@@ -2,6 +2,7 @@ package com.plexon.travel;
 
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.MiniMessage;
+import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.command.CommandSender;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -15,6 +16,7 @@ import java.util.Map;
 final class TravelMessages {
     private final JavaPlugin plugin;
     private final MiniMessage miniMessage = MiniMessage.miniMessage();
+    private final LegacyComponentSerializer legacy = LegacyComponentSerializer.legacySection();
     private YamlConfiguration messages;
 
     TravelMessages(JavaPlugin plugin) {
@@ -65,6 +67,10 @@ final class TravelMessages {
 
     String string(String path, String fallback) {
         return messages.getString(path, fallback);
+    }
+
+    String legacy(Component component) {
+        return legacy.serialize(component);
     }
 
     private Component prefix() {
