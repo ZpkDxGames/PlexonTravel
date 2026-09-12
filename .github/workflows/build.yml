@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 env:
-  ACCEPTED_CANDIDATE_SHA: 'c15fa94a6fcfcdbcf1ef52aa92dbb8faa101724a'
+  ACCEPTED_CANDIDATE_SHA: 'a88d1656a75202e71c15d037258771e25e2c123c'
   CORE_SHA256: 'bf4df796e83571e76c06b296c75c5e73ddc8053cb2c587d74c08cd3922e0b4d4'
 
 jobs:
