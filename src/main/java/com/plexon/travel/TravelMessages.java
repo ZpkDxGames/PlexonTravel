@@ -12,11 +12,14 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 final class TravelMessages {
     private final JavaPlugin plugin;
     private final MiniMessage miniMessage = MiniMessage.miniMessage();
     private final LegacyComponentSerializer legacy = LegacyComponentSerializer.legacySection();
+    private final Set<String> warnedInvalidMiniMessage = ConcurrentHashMap.newKeySet();
     private YamlConfiguration messages;
 
     TravelMessages(JavaPlugin plugin) {
@@ -35,10 +38,19 @@ final class TravelMessages {
         } catch (Exception failure) {
             plugin.getLogger().warning("Unable to load embedded messages.yml defaults: " + failure.getMessage());
         }
+        warnedInvalidMiniMessage.clear();
     }
 
     Component raw(String miniMessageText) {
-        return miniMessage.deserialize(miniMessageText == null ? "" : miniMessageText);
+        String text = miniMessageText == null ? "" : miniMessageText;
+        try {
+            return miniMessage.deserialize(text);
+        } catch (RuntimeException invalid) {
+            if (warnedInvalidMiniMessage.add(text)) {
+                plugin.getLogger().warning("Invalid MiniMessage text was rendered literally instead of failing a command: " + invalid.getMessage());
+            }
+            return Component.text(text);
+        }
     }
 
     Component render(String path, String fallback) {
