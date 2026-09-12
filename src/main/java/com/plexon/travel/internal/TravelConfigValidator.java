@@ -10,6 +10,11 @@ import java.util.Set;
 public final class TravelConfigValidator {
     private TravelConfigValidator() {}
 
+    /**
+     * Validates explicitly configured values. Missing paths are intentionally accepted because
+     * Bukkit applies the embedded config.yml defaults on startup/reload; this also keeps upgrades
+     * from rejecting older, smaller config files before those defaults can be merged.
+     */
     public static List<String> validate(ConfigurationSection config) {
         List<String> errors = new ArrayList<>();
         for (String type : List.of("spawn", "hub", "warp", "back", "admin")) {
@@ -51,6 +56,7 @@ public final class TravelConfigValidator {
     }
 
     private static void number(ConfigurationSection config, String path, double min, double max, List<String> errors) {
+        if (!config.contains(path)) return;
         Object raw = config.get(path);
         if (!(raw instanceof Number number)) {
             errors.add(path + " must be numeric");
@@ -60,13 +66,7 @@ public final class TravelConfigValidator {
     }
 
     private static void optionalNumber(ConfigurationSection config, String path, double min, double max, List<String> errors) {
-        if (!config.contains(path)) return;
-        Object raw = config.get(path);
-        if (!(raw instanceof Number number)) {
-            errors.add(path + " must be numeric");
-            return;
-        }
-        range(path, number.doubleValue(), min, max, errors);
+        number(config, path, min, max, errors);
     }
 
     private static void range(String path, double value, double min, double max, List<String> errors) {
@@ -81,12 +81,12 @@ public final class TravelConfigValidator {
     }
 
     private static void enumeration(ConfigurationSection config, String path, Set<String> allowed, List<String> errors) {
+        if (!config.contains(path)) return;
         String value = config.getString(path, "").trim().toUpperCase(Locale.ROOT);
         if (!allowed.contains(value)) errors.add(path + " must be one of " + allowed);
     }
 
     private static void optionalEnumeration(ConfigurationSection config, String path, Set<String> allowed, List<String> errors) {
-        if (!config.contains(path)) return;
         enumeration(config, path, allowed, errors);
     }
 }
