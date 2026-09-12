@@ -1,0 +1,7 @@
+# PlexonTravel 3.1 per-world runtime policy.
+# World entries are keyed by durable world UUID; name is informational.
+# Existing 3.0.x RTP settings in config.yml remain the effective fallback until
+# an explicit RTP profile is created for a world with /traveladmin rtp ...
+schema-version: 1
+
+worlds: {}
