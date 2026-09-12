@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.1.1 — External `/warps` Command Ownership
+- Stops declaring and registering the top-level `/warps` command so PlexonCraft's custom per-world warp panel can own that label without command conflicts.
+- Keeps `/warp [name]`, warp persistence, warp administration, the public warp API, and `/ptravel warps` intact.
+- Retains `plexontravel.warps` for internal/browser compatibility.
+- Requires no SQLite, config, world-settings, RTP, void-rescue, TPA, spawn/hub, or warp-data migration from 3.1.0.
+- Moves the stable rollback baseline to `v3.1.0`.
+
 ## 3.1.0 — RTP Boundaries + Void Rescue
 - Adds immutable per-world RTP profiles in `world-settings.yml` while preserving the existing 3.0.x `rtp.*` configuration as the default/legacy ANNULUS policy for worlds without an explicit profile.
 - Adds `ANNULUS`, `RECTANGLE`, and `WORLD_BORDER` boundary modes with world-border intersection, bounded attempts, uniform sampling, asynchronous chunk acquisition, and no forced terrain generation by default.
