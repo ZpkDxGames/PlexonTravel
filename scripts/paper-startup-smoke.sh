@@ -65,7 +65,7 @@ PID=$!
 ready=0
 for _ in $(seq 1 180); do
   log="${WORK}/logs/latest.log"
-  if [[ -f "${log}" ]] && grep -Fq "[PlexonTravel] PlexonTravel ${VERSION} enabled against PlexonCore ${CORE_VERSION}" "${log}"; then
+  if [[ -f "${log}" ]] && grep -Fq "[PlexonTravel] STARTUP_READY version=${VERSION} core=${CORE_VERSION}" "${log}"; then
     ready=1
     break
   fi
@@ -88,14 +88,20 @@ PID=""
 
 log="${WORK}/logs/latest.log"
 if [[ "${ready}" != 1 || ! -f "${log}" ]]; then
-  echo "PlexonTravel did not reach READY during Paper startup" >&2
+  echo "PlexonTravel did not reach STARTUP_READY during Paper startup" >&2
   [[ -f "${log}" ]] && cat "${log}" >&2
   cat "${WORK}/startup-console.log" >&2 || true
   exit 1
 fi
 
 grep -Fq "[PlexonCore] ${CORE_VERSION} enabled" "${log}"
+grep -Fq "[PlexonTravel] STARTUP_READY version=${VERSION} core=${CORE_VERSION}" "${log}"
 grep -Fq "[PlexonTravel] PlexonTravel ${VERSION} enabled against PlexonCore ${CORE_VERSION}" "${log}"
+if [[ -f "${WORK}/plugins/PlexonTravel/startup-failure.txt" ]]; then
+  echo "PlexonTravel left startup-failure.txt after successful startup" >&2
+  cat "${WORK}/plugins/PlexonTravel/startup-failure.txt" >&2
+  exit 1
+fi
 if grep -Eiq 'Error occurred while enabling PlexonTravel|Cannot execute command .*PlexonTravel.*plugin is disabled|NoClassDefFoundError:.*plexon|NoSuchMethodError:.*plexon|LinkageError:.*plexon' "${log}"; then
   echo "PlexonTravel startup smoke found a fatal plugin error" >&2
   grep -Ein 'PlexonTravel|Error occurred while enabling|NoClassDefFoundError|NoSuchMethodError|LinkageError' "${log}" >&2 || true
@@ -103,7 +109,7 @@ if grep -Eiq 'Error occurred while enabling PlexonTravel|Cannot execute command 
 fi
 
 paper_line="$(grep -m1 -E 'This server is running Paper|Starting minecraft server version|Running Java' "${log}" || true)"
-travel_line="$(grep -m1 -F "[PlexonTravel] PlexonTravel ${VERSION} enabled against PlexonCore ${CORE_VERSION}" "${log}")"
+travel_line="$(grep -m1 -F "[PlexonTravel] STARTUP_READY version=${VERSION} core=${CORE_VERSION}" "${log}")"
 core_line="$(grep -m1 -F "[PlexonCore] ${CORE_VERSION} enabled" "${log}")"
 cat > "${ROOT}/PAPER_STARTUP_SMOKE.txt" <<EOF
 result=PASS
