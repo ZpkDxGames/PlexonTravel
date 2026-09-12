@@ -50,7 +50,7 @@ final class TravelMenus implements Listener {
         inventory.setItem(14, item(Material.ENDER_PEARL, "<green><bold>Warps</bold></green>",
             List.of("<gray>Browse configured server destinations.</gray>", "<dark_gray>Click to browse</dark_gray>"), "warps"));
         inventory.setItem(16, item(Material.CHORUS_FRUIT, "<light_purple><bold>Random Teleport</bold></light_purple>",
-            List.of("<gray>Find a safe Survival location.</gray>", "<dark_gray>Click to configure</dark_gray>"), "rtp"));
+            List.of("<gray>Find a safe location inside this world's RTP boundary.</gray>", "<dark_gray>Click to inspect</dark_gray>"), "rtp"));
         inventory.setItem(20, item(Material.RECOVERY_COMPASS, "<yellow><bold>Back</bold></yellow>",
             List.of("<gray>Return to your previous meaningful location.</gray>", "<dark_gray>Click to travel</dark_gray>"), "back"));
         inventory.setItem(22, item(Material.PLAYER_HEAD, "<gold><bold>Teleport Requests</bold></gold>",
@@ -97,23 +97,28 @@ final class TravelMenus implements Listener {
     void openRtp(Player player) {
         MenuHolder holder = new MenuHolder(MenuType.RTP, 0);
         Inventory inventory = create(holder, 27, messages.string("gui.rtp-title", "<gradient:#c084fc:#22d3ee><bold>Random Teleport</bold></gradient>"));
+        RtpProfile profile = rtp.profile(player.getWorld());
         boolean permitted = player.hasPermission("plexontravel.rtp");
-        boolean allowed = permitted && rtp.isAllowed(player.getWorld());
+        boolean allowed = permitted && profile.enabled();
         long cooldown = engine.cooldownRemainingMillis(player, TravelType.RTP);
+        String source = profile.source() == RtpProfileSource.EXPLICIT ? "3.1 world profile" : "legacy/default inheritance";
         inventory.setItem(11, item(Material.COMPASS, "<aqua><bold>Search Zone</bold></aqua>",
             List.of("<gray>World: <white>" + player.getWorld().getName() + "</white></gray>",
-                String.format(Locale.ROOT, "<gray>Minimum: <white>%,.0f</white> blocks</gray>", rtp.minRadius()),
-                String.format(Locale.ROOT, "<gray>Maximum: <white>%,.0f</white> blocks</gray>", rtp.maxRadius())), null));
+                "<gray>Mode: <white>" + profile.boundaryMode().name() + "</white></gray>",
+                "<gray>Boundary: <white>" + rtp.describe(player.getWorld()) + "</white></gray>",
+                "<dark_gray>Source: " + source + "</dark_gray>"), null));
         inventory.setItem(15, item(Material.SHIELD, "<green><bold>Safe Destination</bold></green>",
-            List.of("<gray>Async chunk lookup</gray>", "<gray>World-border aware</gray>", "<gray>Hazard and collision checked</gray>"), null));
+            List.of("<gray>Async chunk lookup</gray>", "<gray>World-border enforced</gray>", "<gray>Hazard and collision checked</gray>"), null));
         List<String> actionLore = new ArrayList<>();
         if (!permitted) actionLore.add("<red>You do not have permission.</red>");
         else if (!allowed) actionLore.add("<red>Unavailable in this world.</red>");
+        else if (rtp.describe(player.getWorld()).startsWith("INVALID")) actionLore.add("<red>Configured boundary has no usable area.</red>");
         else if (cooldown > 0L && !player.hasPermission("plexontravel.cooldown.bypass")) actionLore.add("<yellow>Cooldown: " + Math.max(1L, (cooldown + 999L) / 1000L) + "s</yellow>");
         else actionLore.add("<aqua>Click to find a location</aqua>");
-        inventory.setItem(13, item(allowed ? Material.ENDER_EYE : Material.BARRIER,
-            allowed ? "<light_purple><bold>Find Location</bold></light_purple>" : "<red><bold>Unavailable</bold></red>", actionLore,
-            allowed ? "rtp-go" : null));
+        boolean actionable = allowed && !rtp.describe(player.getWorld()).startsWith("INVALID");
+        inventory.setItem(13, item(actionable ? Material.ENDER_EYE : Material.BARRIER,
+            actionable ? "<light_purple><bold>Find Location</bold></light_purple>" : "<red><bold>Unavailable</bold></red>", actionLore,
+            actionable ? "rtp-go" : null));
         inventory.setItem(22, item(Material.ARROW, "<white>Back</white>", List.of(), "help"));
         player.openInventory(inventory);
     }
