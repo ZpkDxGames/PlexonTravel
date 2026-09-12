@@ -66,17 +66,20 @@ final class DestinationRegistry {
         return switch (mode) {
             case "DISABLED" -> null;
             case "SPAWN" -> spawnFor(world);
-            case "GLOBAL", "SEPARATE" -> legacyHub.get();
-            default -> {
-                Destination configured = world == null ? null : worldHubs.get(world.getUID());
-                if (configured != null) yield configured;
-                String fallback = plugin.getConfig().getString("destinations.hub.fallback", "GLOBAL").toUpperCase(Locale.ROOT);
-                if (fallback.equals("SPAWN")) yield spawnFor(world);
-                if (fallback.equals("NONE")) yield null;
-                Destination global = legacyHub.get();
-                yield global != null ? global : spawnFor(world);
-            }
+            case "GLOBAL" -> legacyHub.get();
+            case "PER_WORLD", "SEPARATE" -> perWorldHubWithFallback(world);
+            default -> perWorldHubWithFallback(world);
         };
+    }
+
+    private Destination perWorldHubWithFallback(World world) {
+        Destination configured = world == null ? null : worldHubs.get(world.getUID());
+        if (configured != null) return configured;
+        String fallback = plugin.getConfig().getString("destinations.hub.fallback", "GLOBAL").toUpperCase(Locale.ROOT);
+        if (fallback.equals("SPAWN")) return spawnFor(world);
+        if (fallback.equals("NONE")) return null;
+        Destination global = legacyHub.get();
+        return global != null ? global : spawnFor(world);
     }
 
     Destination legacySpawn() { return legacySpawn.get(); }
