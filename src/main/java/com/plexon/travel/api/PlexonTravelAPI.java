@@ -18,6 +18,10 @@ public interface PlexonTravelAPI {
 
     Optional<WarpView> warp(String id);
     List<WarpView> warps();
+
+    /** Cached O(1) implementations may override this to avoid materializing the warp list. */
+    default int warpCount() { return warps().size(); }
+
     Optional<BackLocationView> back(UUID playerId);
     TravelStatusView status(UUID playerId);
     boolean isPending(UUID playerId);
