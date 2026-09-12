@@ -3,7 +3,6 @@ package com.plexon.travel;
 import com.plexon.travel.api.PlexonTravelAPI.TravelDestinationView;
 import org.junit.jupiter.api.Test;
 
-import java.lang.reflect.Method;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -12,11 +11,9 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 final class PlexonTravelModelTest {
     @Test
-    void canonicalWarpIdsAreBoundedAndSafe() throws Exception {
-        Method method = PlexonTravel.class.getDeclaredMethod("normalizeId", String.class);
-        method.setAccessible(true);
-        assertEquals("spawn-shop_2", method.invoke(null, " Spawn Shop_2!! "));
-        String longValue = (String) method.invoke(null, "A".repeat(100));
+    void canonicalWarpIdsAreBoundedAndSafe() {
+        assertEquals("spawn-shop_2", DestinationRegistry.normalizeId(" Spawn Shop_2!! "));
+        String longValue = DestinationRegistry.normalizeId("A".repeat(100));
         assertEquals(48, longValue.length());
     }
 
@@ -26,5 +23,12 @@ final class PlexonTravelModelTest {
         assertNotNull(view.worldId());
         assertEquals("world", view.worldName());
         assertFalse(Double.isNaN(view.x()));
+    }
+
+    @Test
+    void tpaRequestExpiresAtItsBoundedDeadline() {
+        TpaRequest request = new TpaRequest(UUID.randomUUID(), UUID.randomUUID(), TpaMode.TO_TARGET, 1_000L, 31_000L);
+        assertFalse(request.expired(30_999L));
+        assertEquals(true, request.expired(31_000L));
     }
 }
