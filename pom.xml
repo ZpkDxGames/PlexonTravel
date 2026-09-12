@@ -4,7 +4,7 @@
 
   <groupId>com.zpkdxgames</groupId>
   <artifactId>PlexonTravel</artifactId>
-  <version>3.1.0</version>
+  <version>3.1.1</version>
   <name>PlexonTravel</name>
   <description>Core-native per-world travel, warps, TPA, RTP boundaries and void rescue for PlexonCraft.</description>
   <url>https://github.com/ZpkDxGames/PlexonTravel</url>
@@ -82,8 +82,10 @@
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-surefire-plugin</artifactId>
-        <version>3.5.6</version>
-        <configuration><useModulePath>false</useModulePath></configuration>
+        <version>3.5.3</version>
+        <configuration>
+          <useModulePath>false</useModulePath>
+        </configuration>
       </plugin>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
@@ -97,7 +99,10 @@
               <createDependencyReducedPom>false</createDependencyReducedPom>
               <minimizeJar>false</minimizeJar>
               <artifactSet>
-                <includes><include>org.xerial:sqlite-jdbc</include></includes>
+                <includes>
+                  <include>org.xerial:sqlite-jdbc</include>
+                  <include>org.slf4j:slf4j-api</include>
+                </includes>
               </artifactSet>
               <filters>
                 <filter>
