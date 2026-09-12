@@ -4,6 +4,7 @@ import org.bukkit.plugin.java.JavaPlugin;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
@@ -34,9 +35,7 @@ final class TravelStorage implements AutoCloseable {
         this.databasePath = databasePath;
     }
 
-    Path path() {
-        return databasePath;
-    }
+    Path path() { return databasePath; }
 
     synchronized void open() throws Exception {
         Files.createDirectories(databasePath.getParent());
@@ -84,6 +83,13 @@ final class TravelStorage implements AutoCloseable {
             }
         }
         return result;
+    }
+
+    synchronized void backup(Path target) throws Exception {
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("PRAGMA wal_checkpoint(FULL)");
+        }
+        Files.copy(databasePath, target, StandardCopyOption.REPLACE_EXISTING);
     }
 
     void saveDestinationAsync(String id, Destination destination) {
@@ -161,9 +167,7 @@ final class TravelStorage implements AutoCloseable {
     private void submit(SqlWork work) {
         io.execute(() -> {
             try {
-                synchronized (this) {
-                    work.run();
-                }
+                synchronized (this) { work.run(); }
             } catch (Exception failure) {
                 plugin.getLogger().log(Level.SEVERE, "Travel persistence write failed", failure);
             }
@@ -180,16 +184,11 @@ final class TravelStorage implements AutoCloseable {
         }
         synchronized (this) {
             if (connection != null) {
-                try {
-                    connection.close();
-                } catch (SQLException ignored) {
-                }
+                try { connection.close(); } catch (SQLException ignored) { }
             }
         }
     }
 
     @FunctionalInterface
-    private interface SqlWork {
-        void run() throws Exception;
-    }
+    private interface SqlWork { void run() throws Exception; }
 }
