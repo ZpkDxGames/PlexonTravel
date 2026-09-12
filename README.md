@@ -1,64 +1,106 @@
 # PlexonTravel
 
-**PlexonTravel 2.0.0** is the stable focused Core-native travel module for PlexonCraft.
-
-Repository/source/release stability is separate from live production command cutover. The published stable artifact is safe to build and verify without claiming that PlexonCraft has already transferred `/spawn`, `/hub`, `/back`, `/warp`, or `/warps` ownership. Runtime certification and command-owner migration may remain `NOT_EXECUTED` / operator-gated in release provenance.
+**PlexonTravel 3.0.0** is the PlexonCraft Core-native travel suite for Paper 26.2 / Java 25. It replaces the legacy Essentials warp surface and WorldSpawn-style spawn/hub routing with one cached, per-world travel runtime built around PlexonCore 2.0.5.
 
 ## Platform
 
 - Paper `26.2.build.121-stable`
 - Java `25` / class major 69
-- PlexonCore `2.0.4` / Core API 2.0
+- PlexonCore `2.0.5` / Core API 2.0
 - SQLite JDBC bundled in the plugin JAR
-- PlaceholderAPI and Vault remain provided/optional integrations
+- Optional PlaceholderAPI and Vault integrations
+- Existing PlexonTravel 2.x SQLite destinations, warps and back history remain readable
 
-## Product scope
+## Player travel surface
 
-PlexonTravel owns the focused spawn, hub, back and warp product: `/spawn`, `/hub`, `/back`, `/warp`, `/warps`, `/setwarp`, `/delwarp`, safe teleport validation, warmups, cooldowns, optional Vault/TheosisEconomy fees, bounded back history, warp management/GUI, migration tooling, public API/events, PlaceholderAPI state and configurable respawn behavior.
+PlexonTravel now owns:
 
-It intentionally does **not** absorb homes, economy, ranks, kits, moderation, general utility commands, TPA, BetterRTP, or AdvancedPortals.
+- `/spawn` — current-world spawn route
+- `/hub` — current-world hub route with configurable fallback
+- `/back` — previous meaningful location
+- `/warp [name]` and `/warps` — cached warp travel and browser
+- `/tpa`, `/tpahere`, `/tpaccept`, `/tpdeny`, `/tpcancel`
+- `/rtp` — safe random teleport with a player GUI
+- `/travel` — compact player help/navigation GUI
 
-## 2.0.0 reliability boundary
+Normal travel shares one presentation and safety pipeline: MiniMessage messages, approximately five-second configurable warmup, bossbar countdown, warmup particles, movement/damage cancellation, final destination revalidation, asynchronous teleport and completion particles/sound.
 
-Stable 2.0.0 preserves the accepted Phase 2/Phase 3 runtime line:
+## Per-world spawn and hub
 
-- per-player attempt ownership begins before destination resolution and remains authoritative through warmup, final validation, fee handling and async teleport completion;
-- duplicate warmup/in-flight requests are rejected instead of replacing an active attempt;
-- executing attempts cannot be cancelled out from under their terminal async callback;
-- a charged failed teleport uses one compensation/refund path, while successful travel commits `/back` history and cooldown exactly once;
-- safe teleport resolution validates finite destinations, world availability, border/body/support constraints and bounded nearby search, then revalidates before charge/teleport;
-- warp IDs remain stable when display names are changed;
-- warp deletion uses actor/action/resource/revision-bound, expiring, one-shot confirmation;
-- malformed candidate configuration is rejected before Bukkit `reloadConfig()`, preserving the previous known-good runtime;
-- PlaceholderAPI expansion reads cached/API state only and does not query disk or SQLite;
-- existing SQLite destination/warp/back and migration metadata remain compatible with 1.0.1.
+`/setspawn` and `/sethub` now configure the player's current world by default. `/setspawn global` and `/sethub global` retain a global compatibility fallback for upgraded 2.x databases.
 
-## Staging-safe rollout
+Destination lookup is cached in memory. SQLite writes remain serialized off the server thread. The public `PlexonTravelAPI` keeps the original global `spawn()` / `hub()` accessors and adds world-aware `spawn(UUID)` / `hub(UUID)` lookups for Plexon-family integrations.
 
-The default remains deliberately conservative:
+Default hub mode is `PER_WORLD`. A missing world hub can fall back to the global hub, that world's spawn, or nothing.
+
+## RTP
+
+RTP is enabled by default only for `Survival_World`:
+
+```yaml
+rtp:
+  allowed-worlds:
+    - Survival_World
+  center:
+    mode: WORLD_SPAWN
+  min-radius: 2000.0
+  max-radius: 10000.0
+  max-attempts: 24
+  generate-chunks: false
+```
+
+Candidates are sampled uniformly by area inside the configured annulus, checked against the world border, and resolved through bounded asynchronous chunk lookup. With `generate-chunks: false`, RTP skips terrain that has not already been generated, avoiding surprise world generation under player load. This is the recommended setting for a Chunky-pregenerated Survival world.
+
+## TPA
+
+TPA requests are in-memory, bounded by an expiry timer, cleaned on quit, and share the same warmup/cancellation/effects engine as spawn, hub, warps and RTP. Multiple incoming requests require an explicit player name when accepting or denying.
+
+## Performance and reliability
+
+- one shared five-tick warmup ticker rather than one repeating task per teleport;
+- asynchronous chunk acquisition and `teleportAsync` for destination travel;
+- bounded safe-location and RTP searches;
+- exact per-player attempt identity across resolution, warmup, fee handling and terminal completion;
+- successful travel commits back history/cooldown once; failed charged travel refunds once;
+- cached destinations/warps/back state with serialized SQLite writes and WAL mode;
+- WAL checkpoint before administrative database backup;
+- InventoryHolder-based GUIs with centralized click/drag cancellation;
+- PlaceholderAPI reads cached/API state only.
+
+## Command cutover
+
+3.0 is intended to be the active command owner, so new installs default to:
+
+```yaml
+commands:
+  takeover-enabled: true
+```
+
+`plugin.yml` declares load-before relationships for Essentials, WorldSpawn and BetterRTP to make migration safer when legacy plugins are temporarily present. For a clean production cutover, remove or disable the overlapping legacy commands/modules after verification rather than relying indefinitely on command-registration order.
+
+`/ptravel` remains available as a namespaced recovery/staging surface. Set `commands.takeover-enabled: false` if overlapping providers must remain active during a staged migration.
+
+## Migration
+
+`/traveladmin migrate scan` is read-only. Essentials warp import remains separately gated by:
 
 ```yaml
 migration:
-  claim-standard-commands: false
   allow-execute: false
 ```
 
-Use `/ptravel spawn`, `/ptravel hub`, `/ptravel back`, `/ptravel warp <name>` and `/ptravel warps` while auditing existing command owners. `/traveladmin migrate scan` is read-only; migration execution is separately gated.
-
-Before enabling standard command takeover on PlexonCraft, inventory command aliases/owners, GUIPlus/MyCommand/commands.yml consumers, permissions, legacy warp data and placeholder consumers. BetterRTP and AdvancedPortals remain outside this cutover.
-
-See `docs/STAGING.md`, `docs/TRAVEL_SOURCE_AUDIT.md`, and `docs/PHASE3_CONSOLIDATION_AUDIT.md` for the operational migration checklist.
+Run a database backup and review the scan before temporarily enabling migration execution. Source plugin files are never modified. WorldSpawn formats vary, so per-world spawn/hub cutover is deliberately explicit with `/setspawn` and `/sethub` rather than guessing ambiguous legacy coordinates.
 
 ## Build and release verification
 
-CI provisions the exact released `PlexonCore-2.0.4.jar` and verifies its pinned SHA-256, runs the full Maven test/package suite, requires a non-empty all-green test result, verifies Java 25/class-major 69, checks required plugin resources/API/events/SQLite runtime, and rejects shaded Paper/Bukkit/Adventure/Core/PlaceholderAPI/Vault classes.
+CI provisions the exact released `PlexonCore-2.0.5.jar` with a pinned SHA-256, runs the Maven test/package suite, verifies the installable distribution, records checksum/provenance/test evidence, and rejects a release unless all tests pass without failures, errors or skips.
 
 Stable output:
 
 ```text
-target/PlexonTravel-2.0.0.jar
+target/PlexonTravel-3.0.0.jar
 ```
 
-The stable publisher runs only from `release/stable`, requires that commit to equal current `main`, proves accepted `v2.0.0-rc.1` ancestry, rebuilds exact source, publishes JAR + checksum + test summary + provenance, downloads the published release again, and verifies its SHA-256 and exact source commit before the workflow can finish green.
+The stable publisher runs only from `release/stable`, requires that commit to equal current `main`, rebuilds and retests exact source, publishes the JAR plus `SHA256SUMS.txt`, `TEST_SUMMARY.txt` and `PROVENANCE.txt`, then downloads and verifies the published assets again.
 
-Rollback baseline: `v1.0.1` / `772188d55c694deea0bc5ae0bdce0898513499e5`.
+Rollback baseline: `v2.0.0` / `2d29d559e08a98f1e3577fbd3a574e34154c4b71`.
