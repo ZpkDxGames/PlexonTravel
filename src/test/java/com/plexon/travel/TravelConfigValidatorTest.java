@@ -30,6 +30,9 @@ class TravelConfigValidatorTest {
     }
 
     @Test void acceptsDefaultShape() { assertTrue(TravelConfigValidator.validate(valid()).isEmpty()); }
+    @Test void acceptsMissingPathsThatWillInheritEmbeddedDefaults() {
+        assertTrue(TravelConfigValidator.validate(new YamlConfiguration()).isEmpty());
+    }
     @Test void acceptsLegacy2xShapeWithoutNewOptionalKeys() {
         var c = valid();
         c.set("hub.mode", "SEPARATE");

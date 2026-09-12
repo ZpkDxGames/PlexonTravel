@@ -21,6 +21,7 @@ class Phase2SourceContractTest {
         assertTrue(source.contains("attempts.owns(playerId, value.attemptId)"));
         assertTrue(source.contains("teleportAsync"));
         assertTrue(source.contains("refundOnce(value)"));
+        assertTrue(source.contains("runSync("));
     }
 
     @Test
@@ -40,26 +41,56 @@ class Phase2SourceContractTest {
     }
 
     @Test
-    void rtpUsesBoundedAsyncChunkSearchWithoutForcedGenerationByDefault() throws Exception {
+    void safeResolverNeverSynchronouslyTouchesUnloadedChunks() throws Exception {
+        String source = source("TravelEngine.java");
+        assertTrue(source.contains("safe-teleport.generate-chunks"));
+        assertTrue(source.contains("isChunkGenerated"));
+        assertTrue(source.contains("getChunkAtAsync(chunkX, chunkZ, generate)"));
+        assertTrue(source.contains("if (!world.isChunkLoaded(blockX >> 4, blockZ >> 4)) return false"));
+    }
+
+    @Test
+    void rtpUsesBoundedCancelableAsyncChunkSearch() throws Exception {
         String source = source("RtpService.java");
         assertTrue(source.contains("max-attempts"));
+        assertTrue(source.contains("searching.contains(playerId)"));
         assertTrue(source.contains("isChunkGenerated"));
         assertTrue(source.contains("getChunkAtAsync"));
         assertTrue(source.contains("generate-chunks"));
     }
 
     @Test
-    void tpaUsesSharedTravelEngine() throws Exception {
+    void tpaUsesSharedTravelEngineAndObservesTerminalResult() throws Exception {
         String source = source("TpaService.java");
         assertTrue(source.contains("TravelType.TPA"));
         assertTrue(source.contains("engine.request"));
+        assertTrue(source.contains(".whenComplete((success, failure)"));
     }
 
     @Test
-    void inventoryMenusUseDedicatedHolderIdentification() throws Exception {
+    void inventoryMenusUseDedicatedHolderAndAdventureTitles() throws Exception {
         String source = source("TravelMenus.java");
         assertTrue(source.contains("implements InventoryHolder"));
         assertTrue(source.contains("InventoryDragEvent"));
+        assertTrue(source.contains("Bukkit.createInventory(holder, size, messages.raw(title))"));
+        assertFalse(source.contains("Bukkit.createInventory(holder, size, messages.legacy"));
+    }
+
+    @Test
+    void persistenceSkipsOnlyMalformedRows() throws Exception {
+        String source = source("TravelStorage.java");
+        assertTrue(source.contains("warnInvalidRow(\"destinations\""));
+        assertTrue(source.contains("warnInvalidRow(\"warps\""));
+        assertTrue(source.contains("warnInvalidRow(\"back_locations\""));
+        assertTrue(source.contains("RejectedExecutionException"));
+    }
+
+    @Test
+    void startupFailureIncludesPhaseAndPreservesFailedState() throws Exception {
+        String source = source("PlexonTravel.java");
+        assertTrue(source.contains("catch (Exception | LinkageError failure)"));
+        assertTrue(source.contains("Unexpected startup failure during"));
+        assertTrue(source.contains("if (!startupFailed)"));
     }
 
     @Test
@@ -67,13 +98,13 @@ class Phase2SourceContractTest {
         String source = Files.readString(Path.of("src/main/java/com/plexon/travel/papi/PlexonTravelExpansion.java"));
         assertFalse(source.contains("java.sql"));
         assertFalse(source.contains("Files."));
-        assertTrue(source.contains("api.warps().size()"));
+        assertTrue(source.contains("api.warpCount()"));
     }
 
     @Test
-    void releaseLineIs300OnCore205() throws Exception {
+    void releaseLineIs301OnCore205() throws Exception {
         String pom = Files.readString(Path.of("pom.xml"));
-        assertTrue(pom.contains("<version>3.0.0</version>"));
+        assertTrue(pom.contains("<version>3.0.1</version>"));
         assertTrue(pom.contains("<core.version>2.0.5</core.version>"));
     }
 }

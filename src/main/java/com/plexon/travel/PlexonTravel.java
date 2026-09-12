@@ -37,7 +37,6 @@ import org.bukkit.plugin.java.JavaPlugin;
 
 import java.io.File;
 import java.time.Instant;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
@@ -60,58 +59,62 @@ public final class PlexonTravel extends JavaPlugin implements Listener {
     private TravelMenus menus;
     private TravelCommands commands;
     private PublicApi publicApi;
+    private boolean startupFailed;
 
     @Override
     public void onEnable() {
-        saveDefaultConfig();
-        saveResourceIfAbsent("messages.yml");
-        saveResourceIfAbsent("gui.yml");
-        saveResourceIfAbsent("migration.yml");
-
-        List<String> startupErrors = TravelConfigValidator.validate(getConfig());
-        if (!startupErrors.isEmpty()) {
-            getLogger().severe("Invalid PlexonTravel configuration: " + String.join("; ", startupErrors));
-            getServer().getPluginManager().disablePlugin(this);
-            return;
-        }
-
-        RegisteredServiceProvider<PlexonCoreAPI> registration = getServer().getServicesManager().getRegistration(PlexonCoreAPI.class);
-        if (registration == null || registration.getProvider() == null) {
-            getLogger().severe("PlexonCore API service is unavailable; PlexonTravel cannot start.");
-            getServer().getPluginManager().disablePlugin(this);
-            return;
-        }
-        core = registration.getProvider();
-        if (!CORE_RANGE.contains(core.version())) {
-            getLogger().severe("PlexonCore API " + core.version().apiVersion() + " is outside supported range >=2.0 <3.0");
-            getServer().getPluginManager().disablePlugin(this);
-            return;
-        }
-
-        ModuleRegistry.RegistrationResult moduleRegistration = core.modules().register(new ModuleDescriptor(
-            MODULE_ID,
-            "PlexonTravel",
-            getName(),
-            getPluginMeta().getVersion(),
-            this,
-            CORE_RANGE,
-            Set.of("spawn", "hub", "back", "warps", "per-world-destinations", "tpa", "rtp", "safe-teleport",
-                "teleport-warmup", "minimessage-ui", "travel-api", "travel-events", "sqlite-persistence"),
-            ModuleState.STARTING,
-            "Initializing travel runtime",
-            Instant.now()
-        ));
-        if (!moduleRegistration.success()) {
-            getLogger().severe("Core module registration failed: " + moduleRegistration.message());
-            getServer().getPluginManager().disablePlugin(this);
-            return;
-        }
-
+        String phase = "bootstrap";
         try {
+            phase = "resource/config initialization";
+            saveDefaultConfig();
+            saveResourceIfAbsent("messages.yml");
+            saveResourceIfAbsent("gui.yml");
+            saveResourceIfAbsent("migration.yml");
+
+            List<String> startupErrors = TravelConfigValidator.validate(getConfig());
+            if (!startupErrors.isEmpty()) {
+                failStartup("Invalid PlexonTravel configuration: " + String.join("; ", startupErrors), null);
+                return;
+            }
+
+            phase = "PlexonCore service discovery";
+            RegisteredServiceProvider<PlexonCoreAPI> registration = getServer().getServicesManager().getRegistration(PlexonCoreAPI.class);
+            if (registration == null || registration.getProvider() == null) {
+                failStartup("PlexonCore API service is unavailable; PlexonTravel cannot start.", null);
+                return;
+            }
+            core = registration.getProvider();
+            if (!CORE_RANGE.contains(core.version())) {
+                failStartup("PlexonCore API " + core.version().apiVersion() + " is outside supported range >=2.0 <3.0", null);
+                return;
+            }
+
+            phase = "PlexonCore module registration";
+            ModuleRegistry.RegistrationResult moduleRegistration = core.modules().register(new ModuleDescriptor(
+                MODULE_ID,
+                "PlexonTravel",
+                getName(),
+                getPluginMeta().getVersion(),
+                this,
+                CORE_RANGE,
+                Set.of("spawn", "hub", "back", "warps", "per-world-destinations", "tpa", "rtp", "safe-teleport",
+                    "teleport-warmup", "minimessage-ui", "travel-api", "travel-events", "sqlite-persistence"),
+                ModuleState.STARTING,
+                "Initializing travel runtime",
+                Instant.now()
+            ));
+            if (!moduleRegistration.success()) {
+                failStartup("Core module registration failed: " + moduleRegistration.message(), null);
+                return;
+            }
+
+            phase = "SQLite persistence";
             storage = new TravelStorage(this, getDataFolder().toPath().resolve("travel.db"));
             storage.open();
             destinations = new DestinationRegistry(this, storage);
             destinations.load();
+
+            phase = "runtime services";
             messages = new TravelMessages(this);
             engine = new TravelEngine(this, destinations, messages);
             rtp = new RtpService(this, engine, messages);
@@ -119,43 +122,53 @@ public final class PlexonTravel extends JavaPlugin implements Listener {
             menus = new TravelMenus(this, destinations, engine, messages, rtp);
             commands = new TravelCommands(this, destinations, engine, messages, menus, tpa, rtp, storage);
             publicApi = new PublicApi();
-        } catch (Exception failure) {
-            core.modules().updateState(MODULE_ID, this, ModuleState.FAILED, "Startup failed: " + failure.getMessage());
-            getLogger().log(Level.SEVERE, "Failed to initialize PlexonTravel", failure);
-            getServer().getPluginManager().disablePlugin(this);
-            return;
-        }
 
-        getServer().getServicesManager().register(PlexonTravelAPI.class, publicApi, this, ServicePriority.Normal);
-        if (getServer().getPluginManager().isPluginEnabled("PlaceholderAPI")) {
-            try {
-                new PlexonTravelExpansion(this, publicApi).register();
-                getLogger().info("PlaceholderAPI expansion registered.");
-            } catch (Throwable failure) {
-                getLogger().log(Level.WARNING, "PlaceholderAPI expansion registration failed", failure);
+            phase = "Bukkit registration";
+            getServer().getServicesManager().register(PlexonTravelAPI.class, publicApi, this, ServicePriority.Normal);
+            if (getServer().getPluginManager().isPluginEnabled("PlaceholderAPI")) {
+                try {
+                    new PlexonTravelExpansion(this, publicApi).register();
+                    getLogger().info("PlaceholderAPI expansion registered.");
+                } catch (Throwable failure) {
+                    getLogger().log(Level.WARNING, "PlaceholderAPI expansion registration failed", failure);
+                }
             }
+            getServer().getPluginManager().registerEvents(this, this);
+            getServer().getPluginManager().registerEvents(menus, this);
+            registerCommands();
+            engine.startTicker();
+            tpa.startTicker();
+
+            core.modules().updateState(MODULE_ID, this, ModuleState.READY,
+                "Core " + core.version().pluginVersion() + " / API " + core.version().apiVersion()
+                    + "; per-world destinations=" + (destinations.worldSpawnCount() + destinations.worldHubCount())
+                    + "; warps=" + destinations.warpCount());
+            getLogger().info("PlexonTravel " + getPluginMeta().getVersion() + " enabled against PlexonCore " + core.version().pluginVersion());
+        } catch (Exception | LinkageError failure) {
+            failStartup("Unexpected startup failure during " + phase + ": " + failure.getMessage(), failure);
         }
+    }
 
-        getServer().getPluginManager().registerEvents(this, this);
-        getServer().getPluginManager().registerEvents(menus, this);
-        registerCommands();
-        engine.startTicker();
-        tpa.startTicker();
-
-        core.modules().updateState(MODULE_ID, this, ModuleState.READY,
-            "Core " + core.version().pluginVersion() + " / API " + core.version().apiVersion()
-                + "; per-world destinations=" + (destinations.worldSpawnCount() + destinations.worldHubCount())
-                + "; warps=" + destinations.warpCount());
-        getLogger().info("PlexonTravel " + getPluginMeta().getVersion() + " enabled against PlexonCore " + core.version().pluginVersion());
+    private void failStartup(String detail, Throwable failure) {
+        startupFailed = true;
+        if (core != null) {
+            try { core.modules().updateState(MODULE_ID, this, ModuleState.FAILED, detail); } catch (Throwable ignored) { }
+        }
+        if (failure == null) getLogger().severe(detail);
+        else getLogger().log(Level.SEVERE, detail, failure);
+        getServer().getPluginManager().disablePlugin(this);
     }
 
     @Override
     public void onDisable() {
         if (tpa != null) tpa.shutdown();
+        if (rtp != null) rtp.shutdown();
         if (engine != null) engine.shutdown();
         if (getServer() != null) getServer().getServicesManager().unregisterAll(this);
         if (core != null) {
-            try { core.modules().updateState(MODULE_ID, this, ModuleState.DISABLED, "Plugin disabled"); } catch (Throwable ignored) { }
+            if (!startupFailed) {
+                try { core.modules().updateState(MODULE_ID, this, ModuleState.DISABLED, "Plugin disabled"); } catch (Throwable ignored) { }
+            }
             try { core.modules().unregisterOwnedBy(this); } catch (Throwable ignored) { }
         }
         if (storage != null) storage.close();
@@ -177,16 +190,19 @@ public final class PlexonTravel extends JavaPlugin implements Listener {
     }
 
     boolean requestSpawn(Player player) {
+        if (!requirePermission(player, "plexontravel.spawn")) return true;
         Destination destination = destinations.spawnFor(player.getWorld());
         return request(player, TravelType.SPAWN, destination, "spawn:" + player.getWorld().getUID(), -1D);
     }
 
     boolean requestHub(Player player) {
+        if (!requirePermission(player, "plexontravel.hub")) return true;
         Destination destination = destinations.hubFor(player.getWorld());
         return request(player, TravelType.HUB, destination, "hub:" + player.getWorld().getUID(), -1D);
     }
 
     boolean requestBack(Player player) {
+        if (!requirePermission(player, "plexontravel.back")) return true;
         BackEntry entry = destinations.back(player.getUniqueId());
         if (entry == null) {
             messages.send(player, "back.missing", "<yellow>No back location is available.</yellow>");
@@ -196,6 +212,7 @@ public final class PlexonTravel extends JavaPlugin implements Listener {
     }
 
     boolean requestWarp(Player player, String requestedId) {
+        if (!requirePermission(player, "plexontravel.warp")) return true;
         Warp warp = destinations.warp(requestedId);
         if (warp == null || !warp.enabled()) {
             messages.send(player, "warp.missing", "<red>Warp not found.</red>");
@@ -206,6 +223,12 @@ public final class PlexonTravel extends JavaPlugin implements Listener {
             return true;
         }
         return request(player, TravelType.WARP, warp.destination(), "warp:" + warp.id(), -1D);
+    }
+
+    private boolean requirePermission(Player player, String permission) {
+        if (player.hasPermission(permission)) return true;
+        messages.send(player, "commands.no-permission", "<red>You do not have permission.</red>");
+        return false;
     }
 
     private boolean request(Player player, TravelType type, Destination destination, String sourceId, double feeOverride) {
@@ -225,7 +248,7 @@ public final class PlexonTravel extends JavaPlugin implements Listener {
     TravelMessages messages() { return messages; }
     void fire(Event event) { getServer().getPluginManager().callEvent(event); }
 
-    @EventHandler(priority = EventPriority.MONITOR)
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onMove(PlayerMoveEvent event) {
         if (engine != null && event.getTo() != null) engine.onMove(event.getPlayer(), event.getTo());
     }
@@ -246,16 +269,21 @@ public final class PlexonTravel extends JavaPlugin implements Listener {
     @EventHandler(priority = EventPriority.MONITOR)
     public void onDeath(PlayerDeathEvent event) {
         Player player = event.getEntity();
-        if (engine != null) engine.cancel(player.getUniqueId(), CancelReason.DIED);
+        UUID playerId = player.getUniqueId();
+        if (engine != null) engine.cancel(playerId, CancelReason.DIED);
+        if (rtp != null) rtp.cancel(playerId);
         if (destinations != null && getConfig().getBoolean("back.capture.deaths", true)) {
-            destinations.setBack(player.getUniqueId(), player.getLocation(), "death");
+            destinations.setBack(playerId, player.getLocation(), "death");
         }
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onWorldChange(PlayerChangedWorldEvent event) {
-        if (engine == null || engine.isInternal(event.getPlayer().getUniqueId())) return;
-        engine.cancel(event.getPlayer().getUniqueId(), CancelReason.WORLD_CHANGED);
+        if (engine == null) return;
+        UUID playerId = event.getPlayer().getUniqueId();
+        if (engine.isInternal(playerId)) return;
+        if (rtp != null) rtp.cancel(playerId);
+        engine.cancel(playerId, CancelReason.WORLD_CHANGED);
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
@@ -274,6 +302,7 @@ public final class PlexonTravel extends JavaPlugin implements Listener {
 
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onRespawn(PlayerRespawnEvent event) {
+        if (destinations == null) return;
         String mode = getConfig().getString("respawn.mode", "VANILLA").toUpperCase(Locale.ROOT);
         Destination destination = null;
         if (mode.equals("SPAWN")) destination = destinations.spawnFor(event.getPlayer().getWorld());
@@ -288,7 +317,7 @@ public final class PlexonTravel extends JavaPlugin implements Listener {
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onJoin(PlayerJoinEvent event) {
-        if (!getConfig().getBoolean("join.teleport-to-spawn", false)) return;
+        if (destinations == null || engine == null || !getConfig().getBoolean("join.teleport-to-spawn", false)) return;
         Destination destination = destinations.spawnFor(event.getPlayer().getWorld());
         if (destination == null) return;
         Bukkit.getScheduler().runTask(this, () -> engine.directJoinTeleport(event.getPlayer(), destination));
@@ -324,8 +353,10 @@ public final class PlexonTravel extends JavaPlugin implements Listener {
 
         @Override
         public List<WarpView> warps() {
-            return destinations.warps().stream().sorted(Comparator.comparingInt(Warp::sortOrder).thenComparing(Warp::id)).map(Warp::view).toList();
+            return destinations.warps().stream().map(Warp::view).toList();
         }
+
+        @Override public int warpCount() { return destinations.warpCount(); }
 
         @Override
         public Optional<BackLocationView> back(UUID playerId) {

@@ -1,7 +1,6 @@
 package com.plexon.travel;
 
 import com.plexon.travel.api.PlexonTravelAPI.TravelType;
-import net.kyori.adventure.text.Component;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
@@ -19,7 +18,6 @@ import org.bukkit.persistence.PersistentDataType;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 
 final class TravelMenus implements Listener {
     private final PlexonTravel plugin;
@@ -56,12 +54,16 @@ final class TravelMenus implements Listener {
         inventory.setItem(20, item(Material.RECOVERY_COMPASS, "<yellow><bold>Back</bold></yellow>",
             List.of("<gray>Return to your previous meaningful location.</gray>", "<dark_gray>Click to travel</dark_gray>"), "back"));
         inventory.setItem(22, item(Material.PLAYER_HEAD, "<gold><bold>Teleport Requests</bold></gold>",
-            List.of("<gray>/tpa &lt;player&gt;</gray>", "<gray>/tpahere &lt;player&gt;</gray>", "<gray>/tpaccept • /tpdeny</gray>"), "tpa-info"));
+            List.of("<gray>/tpa player</gray>", "<gray>/tpahere player</gray>", "<gray>/tpaccept • /tpdeny</gray>"), "tpa-info"));
         inventory.setItem(24, item(Material.BARRIER, "<red>Close</red>", List.of(), "close"));
         player.openInventory(inventory);
     }
 
     void openWarps(Player player, int requestedPage) {
+        if (!player.hasPermission("plexontravel.warps") && !player.hasPermission("plexontravel.warp")) {
+            messages.send(player, "commands.no-permission", "<red>You do not have permission.</red>");
+            return;
+        }
         List<Warp> available = destinations.availableWarps();
         int pages = Math.max(1, (available.size() + 44) / 45);
         int page = Math.max(0, Math.min(requestedPage, pages - 1));
@@ -95,7 +97,8 @@ final class TravelMenus implements Listener {
     void openRtp(Player player) {
         MenuHolder holder = new MenuHolder(MenuType.RTP, 0);
         Inventory inventory = create(holder, 27, messages.string("gui.rtp-title", "<gradient:#c084fc:#22d3ee><bold>Random Teleport</bold></gradient>"));
-        boolean allowed = rtp.isAllowed(player.getWorld());
+        boolean permitted = player.hasPermission("plexontravel.rtp");
+        boolean allowed = permitted && rtp.isAllowed(player.getWorld());
         long cooldown = engine.cooldownRemainingMillis(player, TravelType.RTP);
         inventory.setItem(11, item(Material.COMPASS, "<aqua><bold>Search Zone</bold></aqua>",
             List.of("<gray>World: <white>" + player.getWorld().getName() + "</white></gray>",
@@ -104,7 +107,8 @@ final class TravelMenus implements Listener {
         inventory.setItem(15, item(Material.SHIELD, "<green><bold>Safe Destination</bold></green>",
             List.of("<gray>Async chunk lookup</gray>", "<gray>World-border aware</gray>", "<gray>Hazard and collision checked</gray>"), null));
         List<String> actionLore = new ArrayList<>();
-        if (!allowed) actionLore.add("<red>Unavailable in this world.</red>");
+        if (!permitted) actionLore.add("<red>You do not have permission.</red>");
+        else if (!allowed) actionLore.add("<red>Unavailable in this world.</red>");
         else if (cooldown > 0L && !player.hasPermission("plexontravel.cooldown.bypass")) actionLore.add("<yellow>Cooldown: " + Math.max(1L, (cooldown + 999L) / 1000L) + "s</yellow>");
         else actionLore.add("<aqua>Click to find a location</aqua>");
         inventory.setItem(13, item(allowed ? Material.ENDER_EYE : Material.BARRIER,
@@ -115,7 +119,7 @@ final class TravelMenus implements Listener {
     }
 
     private Inventory create(MenuHolder holder, int size, String title) {
-        Inventory inventory = Bukkit.createInventory(holder, size, messages.legacy(messages.raw(title)));
+        Inventory inventory = Bukkit.createInventory(holder, size, messages.raw(title));
         holder.inventory = inventory;
         return inventory;
     }
@@ -169,7 +173,7 @@ final class TravelMenus implements Listener {
             case "rtp" -> openRtp(player);
             case "rtp-go" -> { player.closeInventory(); rtp.begin(player); }
             case "help" -> openHelp(player);
-            case "tpa-info" -> messages.sendRaw(player, "<gray>Use <aqua>/tpa &lt;player&gt;</aqua> to go to someone, <aqua>/tpahere &lt;player&gt;</aqua> to invite them to you, then <green>/tpaccept</green> or <red>/tpdeny</red>.</gray>");
+            case "tpa-info" -> messages.sendRaw(player, "<gray>Use <aqua>/tpa player</aqua> to go to someone, <aqua>/tpahere player</aqua> to invite them to you, then <green>/tpaccept</green> or <red>/tpdeny</red>.</gray>");
             case "close" -> player.closeInventory();
             default -> { }
         }

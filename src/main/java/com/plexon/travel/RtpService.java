@@ -33,6 +33,10 @@ final class RtpService {
     }
 
     boolean begin(Player player) {
+        if (!player.hasPermission("plexontravel.rtp")) {
+            messages.send(player, "commands.no-permission", "<red>You do not have permission.</red>");
+            return false;
+        }
         if (!plugin.getConfig().getBoolean("rtp.enabled", true)) {
             messages.send(player, "rtp.disabled", "<red>Random teleport is disabled.</red>");
             return false;
@@ -47,7 +51,8 @@ final class RtpService {
                 Map.of("seconds", Math.max(1L, (remaining + 999L) / 1000L)));
             return false;
         }
-        if (!searching.add(player.getUniqueId())) {
+        UUID playerId = player.getUniqueId();
+        if (!searching.add(playerId)) {
             messages.send(player, "rtp.already-searching", "<yellow>A safe RTP destination is already being searched.</yellow>");
             return false;
         }
@@ -55,10 +60,14 @@ final class RtpService {
         searches.increment();
         messages.send(player, "rtp.searching", "<gray>Searching for a safe location...</gray>");
         World world = player.getWorld();
-        search(world).whenComplete((destination, failure) -> Bukkit.getScheduler().runTask(plugin, () -> {
-            UUID playerId = player.getUniqueId();
+        UUID worldId = world.getUID();
+        search(world, playerId).whenComplete((destination, failure) -> runSync(() -> {
             if (!searching.remove(playerId)) return;
             if (!player.isOnline()) return;
+            if (!player.getWorld().getUID().equals(worldId)) {
+                messages.send(player, "rtp.cancelled-world-change", "<yellow>RTP search cancelled because you changed worlds.</yellow>");
+                return;
+            }
             if (failure != null || destination == null) {
                 exhausted.increment();
                 messages.send(player, "rtp.failed", "<red>No safe RTP location was found. Try again.</red>");
@@ -74,6 +83,10 @@ final class RtpService {
         searching.remove(playerId);
     }
 
+    void shutdown() {
+        searching.clear();
+    }
+
     boolean isSearching(UUID playerId) {
         return searching.contains(playerId);
     }
@@ -81,7 +94,7 @@ final class RtpService {
     boolean isAllowed(World world) {
         List<String> configured = plugin.getConfig().getStringList("rtp.allowed-worlds");
         if (configured.isEmpty()) configured = List.of("Survival_World");
-        String name = world.getName().toLowerCase(Locale.ROOT);
+        String name = world.getName();
         return configured.stream().anyMatch(value -> value.equalsIgnoreCase(name));
     }
 
@@ -102,17 +115,21 @@ final class RtpService {
         return world.getSpawnLocation();
     }
 
-    private CompletableFuture<Destination> search(World world) {
+    private CompletableFuture<Destination> search(World world, UUID playerId) {
         CompletableFuture<Destination> future = new CompletableFuture<>();
         Location center = center(world);
         int attempts = Math.max(1, Math.min(64, plugin.getConfig().getInt("rtp.max-attempts", 24)));
-        searchAttempt(world, center.getX(), center.getZ(), minRadius(), maxRadius(), 0, attempts, future);
+        searchAttempt(world, playerId, center.getX(), center.getZ(), minRadius(), maxRadius(), 0, attempts, future);
         return future;
     }
 
-    private void searchAttempt(World world, double centerX, double centerZ, double minRadius, double maxRadius,
+    private void searchAttempt(World world, UUID playerId, double centerX, double centerZ, double minRadius, double maxRadius,
                                int attempt, int maxAttempts, CompletableFuture<Destination> future) {
         if (future.isDone()) return;
+        if (!searching.contains(playerId)) {
+            future.complete(null);
+            return;
+        }
         if (attempt >= maxAttempts) {
             future.complete(null);
             return;
@@ -123,20 +140,24 @@ final class RtpService {
         int chunkZ = point.z() >> 4;
         Location borderProbe = new Location(world, point.x() + 0.5D, world.getSpawnLocation().getY(), point.z() + 0.5D);
         if (!world.getWorldBorder().isInside(borderProbe)) {
-            searchAttempt(world, centerX, centerZ, minRadius, maxRadius, attempt + 1, maxAttempts, future);
+            searchAttempt(world, playerId, centerX, centerZ, minRadius, maxRadius, attempt + 1, maxAttempts, future);
             return;
         }
 
         boolean generate = plugin.getConfig().getBoolean("rtp.generate-chunks", false);
         if (!generate && !world.isChunkGenerated(chunkX, chunkZ)) {
-            searchAttempt(world, centerX, centerZ, minRadius, maxRadius, attempt + 1, maxAttempts, future);
+            searchAttempt(world, playerId, centerX, centerZ, minRadius, maxRadius, attempt + 1, maxAttempts, future);
             return;
         }
 
-        world.getChunkAtAsync(chunkX, chunkZ, generate).whenComplete((chunk, failure) -> Bukkit.getScheduler().runTask(plugin, () -> {
+        world.getChunkAtAsync(chunkX, chunkZ, generate).whenComplete((chunk, failure) -> runSync(() -> {
             if (future.isDone()) return;
+            if (!searching.contains(playerId)) {
+                future.complete(null);
+                return;
+            }
             if (failure != null || chunk == null) {
-                searchAttempt(world, centerX, centerZ, minRadius, maxRadius, attempt + 1, maxAttempts, future);
+                searchAttempt(world, playerId, centerX, centerZ, minRadius, maxRadius, attempt + 1, maxAttempts, future);
                 return;
             }
             int y = world.getHighestBlockYAt(point.x(), point.z(), HeightMap.MOTION_BLOCKING_NO_LEAVES) + 1;
@@ -145,9 +166,15 @@ final class RtpService {
             if (engine.isSafe(candidate)) {
                 future.complete(Destination.from(candidate));
             } else {
-                searchAttempt(world, centerX, centerZ, minRadius, maxRadius, attempt + 1, maxAttempts, future);
+                searchAttempt(world, playerId, centerX, centerZ, minRadius, maxRadius, attempt + 1, maxAttempts, future);
             }
         }));
+    }
+
+    private void runSync(Runnable action) {
+        if (!plugin.isEnabled()) return;
+        if (Bukkit.isPrimaryThread()) action.run();
+        else Bukkit.getScheduler().runTask(plugin, action);
     }
 
     long searchCount() { return searches.sum(); }

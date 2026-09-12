@@ -55,6 +55,7 @@ final class TravelEngine {
     private final LongAdder unsafeRejected = new LongAdder();
     private BukkitTask ticker;
     private long runtimeEpoch = 1L;
+    private long nextCooldownPruneNanos;
 
     TravelEngine(PlexonTravel plugin, DestinationRegistry destinations, TravelMessages messages) {
         this.plugin = plugin;
@@ -116,8 +117,12 @@ final class TravelEngine {
         }
 
         long requestEpoch = runtimeEpoch;
-        safeResolver.resolve(destination).whenComplete((safe, error) -> Bukkit.getScheduler().runTask(plugin,
-            () -> beginResolved(player, type, destination, sourceId, policy, safe, error, attemptId, requestEpoch, result)));
+        safeResolver.resolve(destination).whenComplete((safe, error) -> runSync(
+            () -> beginResolved(player, type, destination, sourceId, policy, safe, error, attemptId, requestEpoch, result),
+            () -> {
+                attempts.release(playerId, attemptId);
+                result.complete(false);
+            }));
         return result;
     }
 
@@ -215,6 +220,10 @@ final class TravelEngine {
 
     private void tick() {
         long now = System.nanoTime();
+        if (now >= nextCooldownPruneNanos) {
+            cooldowns.entrySet().removeIf(entry -> entry.getValue().values().stream().noneMatch(deadline -> deadline > now));
+            nextCooldownPruneNanos = now + TimeUnit.SECONDS.toNanos(30);
+        }
         for (Pending value : pending.values()) {
             if (value.executing) continue;
             if (value.epoch != runtimeEpoch) {
@@ -295,7 +304,7 @@ final class TravelEngine {
         UUID playerId = value.player.getUniqueId();
         if (pending.get(playerId) != value || value.executing) return;
         value.executing = true;
-        safeResolver.resolve(value.destination).whenComplete((safe, error) -> Bukkit.getScheduler().runTask(plugin, () -> {
+        safeResolver.resolve(value.destination).whenComplete((safe, error) -> runSync(() -> {
             if (pending.get(playerId) != value) return;
             if (error != null || safe == null) {
                 unsafeRejected.increment();
@@ -316,7 +325,14 @@ final class TravelEngine {
             value.chargedFee = fee;
             internalTeleports.add(playerId);
             value.player.teleportAsync(safe, PlayerTeleportEvent.TeleportCause.PLUGIN).whenComplete((success, teleportError) ->
-                Bukkit.getScheduler().runTask(plugin, () -> finishTeleport(value, playerId, success, teleportError)));
+                runSync(() -> finishTeleport(value, playerId, success, teleportError), () -> {
+                    internalTeleports.remove(playerId);
+                    refundOnce(value);
+                    if (!value.result.isDone()) value.result.complete(false);
+                }));
+        }, () -> {
+            refundOnce(value);
+            if (!value.result.isDone()) value.result.complete(false);
         }));
     }
 
@@ -344,19 +360,21 @@ final class TravelEngine {
     }
 
     void directJoinTeleport(Player player, Destination destination) {
-        safeResolver.resolve(destination).whenComplete((safe, error) -> Bukkit.getScheduler().runTask(plugin, () -> {
+        safeResolver.resolve(destination).whenComplete((safe, error) -> runSync(() -> {
             if (!player.isOnline() || error != null || safe == null) return;
             UUID playerId = player.getUniqueId();
             internalTeleports.add(playerId);
             player.teleportAsync(safe, PlayerTeleportEvent.TeleportCause.PLUGIN).whenComplete((ok, failure) ->
-                Bukkit.getScheduler().runTask(plugin, () -> internalTeleports.remove(playerId)));
-        }));
+                runSync(() -> internalTeleports.remove(playerId), () -> internalTeleports.remove(playerId)));
+        }, () -> { }));
     }
 
     private void refundOnce(Pending value) {
         if (value.refunded || value.chargedFee <= 0D) return;
         value.refunded = true;
-        economy.deposit(value.player, value.chargedFee);
+        if (!economy.deposit(value.player, value.chargedFee)) {
+            plugin.getLogger().severe("Vault refund failed for " + value.player.getName() + " amount=" + value.chargedFee);
+        }
     }
 
     boolean isInternal(UUID playerId) {
@@ -381,10 +399,7 @@ final class TravelEngine {
         }
     }
 
-    long runtimeEpoch() {
-        return runtimeEpoch;
-    }
-
+    long runtimeEpoch() { return runtimeEpoch; }
     long startedCount() { return started.sum(); }
     long completedCount() { return completed.sum(); }
     long movedCancelledCount() { return movementCancelled.sum(); }
@@ -393,7 +408,7 @@ final class TravelEngine {
     int pendingCount() { return attempts.size(); }
 
     boolean isSafe(Location location) {
-        return safeResolver.safe(location.getWorld(), location);
+        return location != null && safeResolver.safe(location.getWorld(), location);
     }
 
     void shutdown() {
@@ -410,6 +425,23 @@ final class TravelEngine {
         pending.clear();
         attempts.clear();
         internalTeleports.clear();
+        cooldowns.clear();
+    }
+
+    private void runSync(Runnable action, Runnable disabled) {
+        if (!plugin.isEnabled()) {
+            disabled.run();
+            return;
+        }
+        if (Bukkit.isPrimaryThread()) {
+            action.run();
+            return;
+        }
+        try {
+            Bukkit.getScheduler().runTask(plugin, action);
+        } catch (RuntimeException unavailable) {
+            disabled.run();
+        }
     }
 
     private final class SafeResolver {
@@ -428,23 +460,31 @@ final class TravelEngine {
                 future.complete(null);
                 return future;
             }
-            World targetWorld = world;
             Location target = new Location(world, destination.x(), destination.y(), destination.z(), destination.yaw(), destination.pitch());
+            if (!plugin.getConfig().getBoolean("safe-teleport.enabled", true)) {
+                future.complete(target);
+                return future;
+            }
             int chunkX = target.getBlockX() >> 4;
             int chunkZ = target.getBlockZ() >> 4;
             if (world.isChunkLoaded(chunkX, chunkZ)) {
-                future.complete(resolveNow(targetWorld, target));
-            } else {
-                world.getChunkAtAsync(chunkX, chunkZ, true).whenComplete((chunk, error) -> Bukkit.getScheduler().runTask(plugin, () -> {
-                    if (error != null) future.completeExceptionally(error);
-                    else future.complete(resolveNow(targetWorld, target));
-                }));
+                future.complete(resolveNow(world, target));
+                return future;
             }
+            boolean generate = plugin.getConfig().getBoolean("safe-teleport.generate-chunks", false);
+            if (!generate && !world.isChunkGenerated(chunkX, chunkZ)) {
+                future.complete(null);
+                return future;
+            }
+            World targetWorld = world;
+            world.getChunkAtAsync(chunkX, chunkZ, generate).whenComplete((chunk, error) -> runSync(() -> {
+                if (error != null || chunk == null) future.complete(null);
+                else future.complete(resolveNow(targetWorld, target));
+            }, () -> future.complete(null)));
             return future;
         }
 
         private Location resolveNow(World world, Location requested) {
-            if (!plugin.getConfig().getBoolean("safe-teleport.enabled", true)) return requested;
             if (safe(world, requested)) return requested;
             if (!plugin.getConfig().getBoolean("safe-teleport.search-nearby", true)) return null;
             int horizontal = Math.max(0, Math.min(8, plugin.getConfig().getInt("safe-teleport.horizontal-radius", 3)));
@@ -471,12 +511,15 @@ final class TravelEngine {
 
         private boolean safe(World world, Location location) {
             if (world == null || location == null) return false;
+            int blockX = location.getBlockX();
+            int blockZ = location.getBlockZ();
+            if (!world.isChunkLoaded(blockX >> 4, blockZ >> 4)) return false;
             int y = location.getBlockY();
             if (y <= world.getMinHeight() || y + 1 >= world.getMaxHeight()) return false;
             if (!world.getWorldBorder().isInside(location)) return false;
-            Block feet = world.getBlockAt(location.getBlockX(), y, location.getBlockZ());
-            Block head = world.getBlockAt(location.getBlockX(), y + 1, location.getBlockZ());
-            Block support = world.getBlockAt(location.getBlockX(), y - 1, location.getBlockZ());
+            Block feet = world.getBlockAt(blockX, y, blockZ);
+            Block head = world.getBlockAt(blockX, y + 1, blockZ);
+            Block support = world.getBlockAt(blockX, y - 1, blockZ);
             return feet.isPassable() && head.isPassable() && support.getType().isSolid()
                 && !danger.contains(feet.getType()) && !danger.contains(head.getType()) && !danger.contains(support.getType());
         }
@@ -502,23 +545,28 @@ final class TravelEngine {
                 Method has = provider.getClass().getMethod("has", OfflinePlayer.class, double.class);
                 if (!Boolean.TRUE.equals(has.invoke(provider, player, amount))) return false;
                 Object response = provider.getClass().getMethod("withdrawPlayer", OfflinePlayer.class, double.class).invoke(provider, player, amount);
-                return Boolean.TRUE.equals(response.getClass().getMethod("transactionSuccess").invoke(response));
+                return transactionSucceeded(response);
             } catch (Throwable failure) {
                 plugin.getLogger().log(Level.WARNING, "Vault withdrawal failed", failure);
                 return false;
             }
         }
 
-        void deposit(Player player, double amount) {
-            if (amount <= 0D) return;
+        boolean deposit(Player player, double amount) {
+            if (amount <= 0D) return true;
             try {
                 Object provider = provider();
-                if (provider != null) {
-                    provider.getClass().getMethod("depositPlayer", OfflinePlayer.class, double.class).invoke(provider, player, amount);
-                }
+                if (provider == null) return false;
+                Object response = provider.getClass().getMethod("depositPlayer", OfflinePlayer.class, double.class).invoke(provider, player, amount);
+                return transactionSucceeded(response);
             } catch (Throwable failure) {
                 plugin.getLogger().log(Level.WARNING, "Vault refund failed", failure);
+                return false;
             }
+        }
+
+        private boolean transactionSucceeded(Object response) throws Exception {
+            return response != null && Boolean.TRUE.equals(response.getClass().getMethod("transactionSuccess").invoke(response));
         }
     }
 

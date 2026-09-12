@@ -41,6 +41,8 @@ tpa:
   requester-offline: '<red>That player is no longer online.</red>'
   accepted: '<green>Teleport request accepted.</green>'
   accepted-requester: '<green>{player}</green> <gray>accepted your teleport request.</gray>'
+  teleport-failed: '<yellow>The accepted teleport could not be completed.</yellow>'
+  teleport-failed-other: '<yellow>The accepted teleport could not be completed.</yellow>'
   denied: '<gray>Teleport request denied.</gray>'
   denied-requester: '<red>{player}</red> <gray>denied your teleport request.</gray>'
   none-outgoing: '<yellow>You do not have an outgoing teleport request.</yellow>'
@@ -56,6 +58,7 @@ rtp:
   world-not-allowed: '<red>RTP is not available in this world.</red>'
   already-searching: '<yellow>A safe RTP destination is already being searched.</yellow>'
   searching: '<gray>Searching for a safe location between the configured minimum and maximum radius...</gray>'
+  cancelled-world-change: '<yellow>RTP search cancelled because you changed worlds.</yellow>'
   failed: '<red>No safe RTP location was found. Try again.</red>'
 
 gui:

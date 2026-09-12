@@ -4,7 +4,7 @@
 
   <groupId>com.zpkdxgames</groupId>
   <artifactId>PlexonTravel</artifactId>
-  <version>3.0.0</version>
+  <version>3.0.1</version>
   <name>PlexonTravel</name>
   <description>Core-native per-world travel, warps, TPA and RTP runtime for PlexonCraft.</description>
   <url>https://github.com/ZpkDxGames/PlexonTravel</url>

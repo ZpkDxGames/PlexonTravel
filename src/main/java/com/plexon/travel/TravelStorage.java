@@ -17,6 +17,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 
@@ -28,6 +29,7 @@ final class TravelStorage implements AutoCloseable {
         thread.setDaemon(true);
         return thread;
     });
+    private volatile boolean acceptingWrites = true;
     private Connection connection;
 
     TravelStorage(JavaPlugin plugin, Path databasePath) {
@@ -50,12 +52,23 @@ final class TravelStorage implements AutoCloseable {
             statement.execute("CREATE TABLE IF NOT EXISTS back_locations(player_uuid TEXT PRIMARY KEY, world_uuid TEXT NOT NULL, world_name TEXT NOT NULL, x REAL NOT NULL, y REAL NOT NULL, z REAL NOT NULL, yaw REAL NOT NULL, pitch REAL NOT NULL, source TEXT NOT NULL, updated_at INTEGER NOT NULL)");
             statement.execute("CREATE TABLE IF NOT EXISTS migration_meta(key TEXT PRIMARY KEY, value TEXT NOT NULL)");
         }
+        acceptingWrites = true;
     }
 
     synchronized Map<String, Destination> loadDestinations() throws SQLException {
         Map<String, Destination> result = new LinkedHashMap<>();
         try (Statement statement = connection.createStatement(); ResultSet rs = statement.executeQuery("SELECT * FROM destinations")) {
-            while (rs.next()) result.put(rs.getString("id"), destination(rs));
+            while (rs.next()) {
+                String id = rowKey(rs, "id");
+                try {
+                    Destination destination = destination(rs);
+                    requireDestination(destination);
+                    if (id.isBlank()) throw new IllegalArgumentException("blank destination id");
+                    result.put(id, destination);
+                } catch (RuntimeException | SQLException invalid) {
+                    warnInvalidRow("destinations", id, invalid);
+                }
+            }
         }
         return result;
     }
@@ -64,11 +77,24 @@ final class TravelStorage implements AutoCloseable {
         Map<String, Warp> result = new LinkedHashMap<>();
         try (Statement statement = connection.createStatement(); ResultSet rs = statement.executeQuery("SELECT * FROM warps")) {
             while (rs.next()) {
-                Destination destination = destination(rs);
-                Warp warp = new Warp(rs.getString("id"), rs.getString("display_name"), destination,
-                    rs.getInt("enabled") != 0, rs.getString("permission"), rs.getInt("permission_required") != 0,
-                    rs.getInt("sort_order"), rs.getString("icon"), rs.getString("category"), rs.getLong("revision"));
-                result.put(warp.id(), warp);
+                String id = rowKey(rs, "id");
+                try {
+                    if (id.isBlank() || !DestinationRegistry.normalizeId(id).equals(id)) {
+                        throw new IllegalArgumentException("invalid stable warp id");
+                    }
+                    Destination destination = destination(rs);
+                    requireDestination(destination);
+                    String displayName = textOr(rs.getString("display_name"), id);
+                    String permission = textOr(rs.getString("permission"), "");
+                    String icon = textOr(rs.getString("icon"), "ENDER_PEARL");
+                    String category = textOr(rs.getString("category"), "Server");
+                    long revision = Math.max(1L, rs.getLong("revision"));
+                    Warp warp = new Warp(id, displayName, destination, rs.getInt("enabled") != 0, permission,
+                        rs.getInt("permission_required") != 0, rs.getInt("sort_order"), icon, category, revision);
+                    result.put(id, warp);
+                } catch (RuntimeException | SQLException invalid) {
+                    warnInvalidRow("warps", id, invalid);
+                }
             }
         }
         return result;
@@ -78,14 +104,22 @@ final class TravelStorage implements AutoCloseable {
         Map<UUID, BackEntry> result = new HashMap<>();
         try (Statement statement = connection.createStatement(); ResultSet rs = statement.executeQuery("SELECT * FROM back_locations")) {
             while (rs.next()) {
-                result.put(UUID.fromString(rs.getString("player_uuid")),
-                    new BackEntry(destination(rs), rs.getString("source"), rs.getLong("updated_at")));
+                String playerKey = rowKey(rs, "player_uuid");
+                try {
+                    UUID playerId = UUID.fromString(playerKey);
+                    Destination destination = destination(rs);
+                    requireDestination(destination);
+                    result.put(playerId, new BackEntry(destination, textOr(rs.getString("source"), "unknown"), rs.getLong("updated_at")));
+                } catch (RuntimeException | SQLException invalid) {
+                    warnInvalidRow("back_locations", playerKey, invalid);
+                }
             }
         }
         return result;
     }
 
     synchronized void backup(Path target) throws Exception {
+        requireOpen();
         try (Statement statement = connection.createStatement()) {
             statement.execute("PRAGMA wal_checkpoint(FULL)");
         }
@@ -154,7 +188,28 @@ final class TravelStorage implements AutoCloseable {
             rs.getDouble("x"), rs.getDouble("y"), rs.getDouble("z"), rs.getFloat("yaw"), rs.getFloat("pitch"));
     }
 
+    private void requireDestination(Destination destination) {
+        if (destination == null || !destination.finite()) throw new IllegalArgumentException("invalid destination coordinates/world identity");
+    }
+
+    private String rowKey(ResultSet rs, String column) {
+        try {
+            return textOr(rs.getString(column), "<unknown>");
+        } catch (SQLException ignored) {
+            return "<unreadable>";
+        }
+    }
+
+    private String textOr(String value, String fallback) {
+        return value == null || value.isBlank() ? fallback : value;
+    }
+
+    private void warnInvalidRow(String table, String key, Exception failure) {
+        plugin.getLogger().warning("Ignoring invalid " + table + " row '" + key + "': " + failure.getMessage());
+    }
+
     private void bindDestination(PreparedStatement ps, Destination destination, int index) throws SQLException {
+        requireDestination(destination);
         ps.setString(index, destination.worldId().toString());
         ps.setString(index + 1, destination.worldName());
         ps.setDouble(index + 2, destination.x());
@@ -165,26 +220,47 @@ final class TravelStorage implements AutoCloseable {
     }
 
     private void submit(SqlWork work) {
-        io.execute(() -> {
-            try {
-                synchronized (this) { work.run(); }
-            } catch (Exception failure) {
-                plugin.getLogger().log(Level.SEVERE, "Travel persistence write failed", failure);
-            }
-        });
+        if (!acceptingWrites) {
+            plugin.getLogger().warning("Discarded a persistence write requested after storage shutdown.");
+            return;
+        }
+        try {
+            io.execute(() -> {
+                try {
+                    synchronized (this) {
+                        requireOpen();
+                        work.run();
+                    }
+                } catch (Exception failure) {
+                    plugin.getLogger().log(Level.SEVERE, "Travel persistence write failed", failure);
+                }
+            });
+        } catch (RejectedExecutionException rejected) {
+            plugin.getLogger().warning("Persistence executor rejected a write during shutdown.");
+        }
+    }
+
+    private void requireOpen() throws SQLException {
+        if (connection == null || connection.isClosed()) throw new SQLException("travel database is not open");
     }
 
     @Override
     public void close() {
+        acceptingWrites = false;
         io.shutdown();
         try {
-            io.awaitTermination(5, TimeUnit.SECONDS);
+            if (!io.awaitTermination(5, TimeUnit.SECONDS)) {
+                int dropped = io.shutdownNow().size();
+                plugin.getLogger().warning("Persistence shutdown exceeded 5s; cancelled " + dropped + " queued write(s).");
+            }
         } catch (InterruptedException interrupted) {
+            io.shutdownNow();
             Thread.currentThread().interrupt();
         }
         synchronized (this) {
             if (connection != null) {
                 try { connection.close(); } catch (SQLException ignored) { }
+                connection = null;
             }
         }
     }

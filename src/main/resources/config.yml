@@ -1,5 +1,5 @@
 commands:
-  # 3.0 is intended to own the legacy Essentials/WorldSpawn travel surface.
+  # PlexonTravel owns the legacy Essentials/WorldSpawn travel surface by default.
   # Set false only while staging alongside another command provider.
   takeover-enabled: true
 
@@ -48,6 +48,9 @@ safe-teleport:
   search-nearby: true
   horizontal-radius: 3
   vertical-radius: 4
+  # Never synchronously generate terrain while resolving spawn/hub/warp/API destinations.
+  # Set true only if travel is intentionally allowed to create new chunks.
+  generate-chunks: false
 
 destinations:
   spawn:
@@ -99,7 +102,7 @@ respawn:
   mode: VANILLA
 
 migration:
-  # Retained as a compatibility marker for older 2.x installs. 3.0 command ownership is controlled above.
+  # Retained as a compatibility marker for older 2.x installs. 3.x command ownership is controlled above.
   claim-standard-commands: true
   # Essentials warp import remains a deliberate operator action.
   allow-execute: false

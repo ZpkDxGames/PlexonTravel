@@ -32,6 +32,7 @@ class CoreLifecycleRegressionTest {
         String source = Files.readString(Path.of("src/main/java/com/plexon/travel/PlexonTravel.java"));
         assertTrue(source.contains("registration == null || registration.getProvider() == null"));
         assertTrue(source.contains("disablePlugin(this)"));
+        assertTrue(source.contains("ModuleState.FAILED"));
     }
 
     @Test
@@ -60,7 +61,7 @@ class CoreLifecycleRegressionTest {
 
     private static ModuleDescriptor descriptor(Plugin plugin, ModuleState state) {
         return new ModuleDescriptor(
-            "travel", "PlexonTravel", plugin.getName(), "3.0.0", plugin, SUPPORTED,
+            "travel", "PlexonTravel", plugin.getName(), "3.0.1", plugin, SUPPORTED,
             Set.of("safe-teleport", "per-world-destinations", "tpa", "rtp"), state, "test", Instant.now());
     }
 
