@@ -1,5 +1,19 @@
 # Changelog
 
+## 3.1.0 — RTP Boundaries + Void Rescue
+- Adds immutable per-world RTP profiles in `world-settings.yml` while preserving the existing 3.0.x `rtp.*` configuration as the default/legacy ANNULUS policy for worlds without an explicit profile.
+- Adds `ANNULUS`, `RECTANGLE`, and `WORLD_BORDER` boundary modes with world-border intersection, bounded attempts, uniform sampling, asynchronous chunk acquisition, and no forced terrain generation by default.
+- Adds console-compatible `/traveladmin rtp` status, enable/disable, mode, center, radius, bounds, corner capture, padding, attempts, generation, reset, and non-teleporting test controls.
+- Adds first-class per-world void rescue with configurable trigger Y, Plexon spawn/hub, vanilla world-spawn, or fixed destinations.
+- Adds a dedicated immediate system-teleport rescue path with no warmup, fee, normal cooldown, or spawn/hub use-permission requirement.
+- Prevents void rescue from overwriting a useful `/back` entry with the unsafe void coordinate and cleans up in-flight rescue state on quit, death, shutdown, and failed destinations.
+- Adds spectator exclusion, explicit creative-mode opt-in, `plexontravel.voidrescue.bypass`, bounded failure backoff, telemetry, diagnostics, and a cancellable `PlexonVoidRescueEvent`.
+- Keeps movement/RTP hot paths free of YAML parsing, filesystem access, and SQL by caching effective immutable world policies.
+- Writes administrator world-policy mutations atomically through a temporary file and rejects invalid radius/bounds/attempt/fixed-destination settings before activation.
+- Expands regression coverage for annulus area distribution, rectangle sampling, world-border geometry, invalid policies, version/source contracts, void-rescue deduplication, and `/back` protection.
+- Keeps Paper `26.2.build.121-stable`, Java 25, PlexonCore 2.0.5, the existing SQLite format, standard travel behavior, and 2.x/3.0.x upgrade compatibility.
+- Moves the stable rollback baseline to `v3.0.2`.
+
 ## 3.0.2 — Production Startup Hotfix
 - Fixes the proven 3.0.x upgrade startup failure where new enum settings inherited from embedded defaults were seen by `contains(path)` but then read with an explicit empty fallback, causing valid 2.x configuration files to fail validation.
 - Adds the exact 2.0.0 configuration shape as a regression fixture and verifies the 3.x spawn fallback, hub fallback and RTP center mode resolve from embedded defaults during upgrade.
