@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 env:
-  ACCEPTED_CANDIDATE_SHA: 'a88d1656a75202e71c15d037258771e25e2c123c'
+  ACCEPTED_CANDIDATE_SHA: 'faaf56ff009b9ef450c2fd75dc54b349e2e0900d'
   CORE_SHA256: 'bf4df796e83571e76c06b296c75c5e73ddc8053cb2c587d74c08cd3922e0b4d4'
 
 jobs:
@@ -90,8 +90,8 @@ jobs:
           paper=26.2.build.121-stable
           plexoncore=2.0.5
           plexoncore_sha256=${CORE_SHA256}
-          rollback_tag=v3.0.1
-          rollback_sha=7fc8fcb64d3153375d9a087d19ce44bc4f4de945
+          rollback_tag=v3.0.2
+          rollback_sha=66c8e1baff74bc307162d0164c5e3e432297d651
           standard_command_takeover=ENABLED_BY_DEFAULT
           migration_execution=OPERATOR_GATED
           jar_size=${size}
