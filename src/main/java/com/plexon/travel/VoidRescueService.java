@@ -51,6 +51,8 @@ final class VoidRescueService implements Listener {
     public void onMove(PlayerMoveEvent event) {
         Location to = event.getTo();
         if (to == null || to.getWorld() == null) return;
+        Location from = event.getFrom();
+        if (from.getWorld() == to.getWorld() && Double.compare(from.getY(), to.getY()) == 0) return;
         World world = to.getWorld();
         VoidRescueRule rule = worldSettings.voidRule(world);
         if (!rule.enabled() || to.getY() > rule.triggerY()) return;
