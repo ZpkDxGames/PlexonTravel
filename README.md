@@ -1,6 +1,6 @@
 # PlexonTravel
 
-**PlexonTravel 3.1.0** is the PlexonCraft Core-native travel suite for Paper 26.2 / Java 25. It provides per-world spawn/hub routing, warps, `/back`, TPA, administrator-controlled RTP boundaries, and optional per-world void rescue on PlexonCore 2.0.5.
+**PlexonTravel 3.1.1** is the PlexonCraft Core-native travel suite for Paper 26.2 / Java 25. It provides per-world spawn/hub routing, warps, `/back`, TPA, administrator-controlled RTP boundaries, and optional per-world void rescue on PlexonCore 2.0.5.
 
 ## Platform
 
@@ -9,7 +9,7 @@
 - PlexonCore `2.0.5` / Core API 2.0
 - SQLite JDBC bundled in the plugin JAR
 - Optional PlaceholderAPI and Vault integrations
-- Existing PlexonTravel 1.x/2.x/3.0 SQLite destinations, warps and back history remain readable
+- Existing PlexonTravel 1.x/2.x/3.x SQLite destinations, warps and back history remain readable
 
 ## Player travel surface
 
@@ -18,11 +18,13 @@ PlexonTravel owns:
 - `/spawn` — current-world spawn route
 - `/hub` — current-world hub route with configurable fallback
 - `/back` — previous meaningful location
-- `/warp [name]` and `/warps` — cached warp travel and browser
+- `/warp [name]` — cached warp travel; `/warp` without a name can still open the internal browser
 - `/tpa`, `/tpahere`, `/tpaccept`, `/tpdeny`, `/tpcancel`
 - `/rtp` — opens the existing safe random-teleport GUI
 - `/rtp now` — begins an RTP search immediately
 - `/travel` — compact player help/navigation GUI
+
+PlexonTravel 3.1.1 intentionally does **not** own the top-level `/warps` label. PlexonCraft reserves `/warps` for its custom per-world warp panel. The warp backend, `plexontravel.warps` permission, public API, administration commands, and `/ptravel warps` recovery/browser route remain available.
 
 Normal travel shares MiniMessage feedback, configurable warmup/cooldown, bossbar countdown, movement/damage cancellation, asynchronous destination resolution, final safety validation, `teleportAsync`, Vault transaction/refund semantics, and completion effects.
 
@@ -160,21 +162,21 @@ TPA requests are in-memory, bounded by an expiry timer, cleaned on quit, and sha
 
 ## Command cutover and migration
 
-3.x remains the active command owner by default with `commands.takeover-enabled: true`. `/ptravel` remains the namespaced staging/recovery surface.
+3.1.1 keeps standard PlexonTravel command ownership enabled except for `/warps`, which is deliberately left to PlexonCraft's external custom panel. `/ptravel` remains the namespaced staging/recovery surface.
 
 `/traveladmin migrate scan` is read-only. Essentials warp import remains gated by `migration.allow-execute: false`; source plugin files are never modified. Older partial `config.yml` files may omit keys added by later versions: missing values inherit embedded defaults while explicitly invalid configured values are rejected.
 
-### Upgrade: 3.0.2 → 3.1.0
+### Upgrade: 3.1.0 → 3.1.1
 
 1. Back up `plugins/PlexonTravel/` and the server before replacing the JAR.
-2. Replace `PlexonTravel-3.0.2.jar` with the verified `PlexonTravel-3.1.0.jar`.
-3. Keep the existing `config.yml` and `travel.db`.
-4. On first startup, `world-settings.yml` is created if absent; no per-world RTP profile is required.
-5. Existing RTP behavior continues through legacy inheritance until an administrator explicitly creates a 3.1 profile.
-6. Void rescue remains disabled until enabled per world.
-7. Use `/traveladmin diagnostics`, `/traveladmin rtp status <world>`, and `/traveladmin void status <world>` to verify effective state.
+2. Replace `PlexonTravel-3.1.0.jar` with the verified `PlexonTravel-3.1.1.jar`.
+3. Keep the existing `config.yml`, `world-settings.yml`, and `travel.db`.
+4. Confirm the custom panel plugin is configured to own `/warps`.
+5. Restart the server and verify `/warps` opens the custom per-world panel.
+6. Verify `/warp <name>` still resolves PlexonTravel warps normally.
+7. Use `/traveladmin diagnostics` to confirm the travel runtime is healthy.
 
-Rollback remains non-destructive: 3.0.2 ignores `world-settings.yml`, and 3.1.0 does not require a SQLite format migration.
+Rollback is non-destructive: 3.1.0 can reuse the same SQLite/config/world-settings data, but it will reclaim the top-level `/warps` command.
 
 ## Build and release verification
 
@@ -183,7 +185,7 @@ CI provisions the exact released `PlexonCore-2.0.5.jar` with a pinned SHA-256, r
 Stable output:
 
 ```text
-target/PlexonTravel-3.1.0.jar
+target/PlexonTravel-3.1.1.jar
 ```
 
-Rollback baseline: `v3.0.2` / `66c8e1baff74bc307162d0164c5e3e432297d651`.
+Rollback baseline: `v3.1.0` / `02e61ad9a48ef80b8bf2a6c6e886b4dd7b94c80b`.

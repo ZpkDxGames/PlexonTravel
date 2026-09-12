@@ -243,7 +243,7 @@ public final class PlexonTravel extends JavaPlugin implements Listener {
     }
 
     private void registerCommands() {
-        for (String name : List.of("spawn", "hub", "back", "warp", "warps", "travel", "rtp", "tpa", "tpahere",
+        for (String name : List.of("spawn", "hub", "back", "warp", "travel", "rtp", "tpa", "tpahere",
             "tpaccept", "tpdeny", "tpcancel", "setspawn", "sethub", "setwarp", "delwarp", "renamewarp", "ptravel", "traveladmin")) {
             PluginCommand command = getCommand(name);
             if (command == null) throw new IllegalStateException("Missing command in plugin.yml: " + name);

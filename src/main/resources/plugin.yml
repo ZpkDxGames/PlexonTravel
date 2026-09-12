@@ -31,9 +31,6 @@ commands:
     description: Travel to a warp or open the warp browser.
     usage: /warp [name]
     permission: plexontravel.warp
-  warps:
-    description: Open the warp browser.
-    permission: plexontravel.warps
   travel:
     description: Open the PlexonTravel player help GUI.
     permission: plexontravel.travel

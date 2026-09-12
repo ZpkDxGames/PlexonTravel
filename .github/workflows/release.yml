@@ -10,8 +10,8 @@ permissions:
 env:
   ACCEPTED_CANDIDATE_SHA: 'faaf56ff009b9ef450c2fd75dc54b349e2e0900d'
   CORE_SHA256: 'bf4df796e83571e76c06b296c75c5e73ddc8053cb2c587d74c08cd3922e0b4d4'
-  ROLLBACK_TAG: v3.0.2
-  ROLLBACK_SHA: 66c8e1baff74bc307162d0164c5e3e432297d651
+  ROLLBACK_TAG: v3.1.0
+  ROLLBACK_SHA: 02e61ad9a48ef80b8bf2a6c6e886b4dd7b94c80b
 
 jobs:
   release:
@@ -105,7 +105,8 @@ jobs:
           plexoncore_sha256=${CORE_SHA256}
           rollback_tag=${ROLLBACK_TAG}
           rollback_sha=${ROLLBACK_SHA}
-          standard_command_takeover=ENABLED_BY_DEFAULT
+          standard_command_takeover=ENABLED_EXCEPT_WARPS
+          warps_command_owner=EXTERNAL_PANEL
           migration_execution=OPERATOR_GATED
           jar_size=${size}
           jar_sha256=${digest}
@@ -146,7 +147,8 @@ jobs:
           (cd published && sha256sum --check SHA256SUMS.txt)
           grep -F "source_sha=${GITHUB_SHA}" published/PROVENANCE.txt
           grep -F "accepted_candidate=${ACCEPTED_CANDIDATE_SHA}" published/PROVENANCE.txt
-          grep -F 'standard_command_takeover=ENABLED_BY_DEFAULT' published/PROVENANCE.txt
+          grep -F 'standard_command_takeover=ENABLED_EXCEPT_WARPS' published/PROVENANCE.txt
+          grep -F 'warps_command_owner=EXTERNAL_PANEL' published/PROVENANCE.txt
           grep -F 'migration_execution=OPERATOR_GATED' published/PROVENANCE.txt
           grep -F 'runtime_certification=CI_PAPER_STARTUP_SMOKE_PASS' published/PROVENANCE.txt
           grep -F 'live_plexoncraft=PENDING' published/PROVENANCE.txt

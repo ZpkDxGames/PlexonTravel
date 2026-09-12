@@ -136,9 +136,19 @@ class Phase2SourceContractTest {
     }
 
     @Test
-    void releaseLineIs310OnCore205() throws Exception {
+    void topLevelWarpsCommandIsReleasedForExternalPanel() throws Exception {
+        String manifest = Files.readString(Path.of("src/main/resources/plugin.yml"));
+        String plugin = source("PlexonTravel.java");
+        assertFalse(manifest.contains("\n  warps:\n"));
+        assertFalse(plugin.contains("\"warp\", \"warps\", \"travel\""));
+        assertTrue(manifest.contains("plexontravel.warps:"));
+        assertTrue(plugin.contains("Set.of(\"spawn\", \"hub\", \"back\", \"warps\""));
+    }
+
+    @Test
+    void releaseLineIs311OnCore205() throws Exception {
         String pom = Files.readString(Path.of("pom.xml"));
-        assertTrue(pom.contains("<version>3.1.0</version>"));
+        assertTrue(pom.contains("<version>3.1.1</version>"));
         assertTrue(pom.contains("<core.version>2.0.5</core.version>"));
     }
 }
