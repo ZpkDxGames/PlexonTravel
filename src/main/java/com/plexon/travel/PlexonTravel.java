@@ -56,7 +56,9 @@ public final class PlexonTravel extends JavaPlugin implements Listener {
     private DestinationRegistry destinations;
     private TravelMessages messages;
     private TravelEngine engine;
+    private WorldSettingsManager worldSettings;
     private RtpService rtp;
+    private VoidRescueService voidRescue;
     private TpaService tpa;
     private TravelMenus menus;
     private TravelCommands commands;
@@ -73,12 +75,15 @@ public final class PlexonTravel extends JavaPlugin implements Listener {
             saveResourceIfAbsent("messages.yml");
             saveResourceIfAbsent("gui.yml");
             saveResourceIfAbsent("migration.yml");
+            saveResourceIfAbsent("world-settings.yml");
 
             List<String> startupErrors = TravelConfigValidator.validate(getConfig());
             if (!startupErrors.isEmpty()) {
                 failStartup("Invalid PlexonTravel configuration: " + String.join("; ", startupErrors), null);
                 return;
             }
+            worldSettings = new WorldSettingsManager(this);
+            worldSettings.load();
 
             markStartupPhase("core");
             RegisteredServiceProvider<PlexonCoreAPI> registration = getServer().getServicesManager().getRegistration(PlexonCoreAPI.class);
@@ -99,8 +104,9 @@ public final class PlexonTravel extends JavaPlugin implements Listener {
                 getPluginMeta().getVersion(),
                 this,
                 CORE_RANGE,
-                Set.of("spawn", "hub", "back", "warps", "per-world-destinations", "tpa", "rtp", "safe-teleport",
-                    "teleport-warmup", "minimessage-ui", "travel-api", "travel-events", "sqlite-persistence"),
+                Set.of("spawn", "hub", "back", "warps", "per-world-destinations", "tpa", "rtp", "rtp-world-profiles",
+                    "rtp-boundaries", "void-rescue", "safe-teleport", "teleport-warmup", "minimessage-ui", "travel-api",
+                    "travel-events", "sqlite-persistence"),
                 ModuleState.STARTING,
                 "Initializing travel runtime",
                 Instant.now()
@@ -119,7 +125,8 @@ public final class PlexonTravel extends JavaPlugin implements Listener {
             markStartupPhase("runtime");
             messages = new TravelMessages(this);
             engine = new TravelEngine(this, destinations, messages);
-            rtp = new RtpService(this, engine, messages);
+            rtp = new RtpService(this, engine, messages, worldSettings);
+            voidRescue = new VoidRescueService(this, destinations, engine, messages, worldSettings);
             tpa = new TpaService(this, engine, messages);
             menus = new TravelMenus(this, destinations, engine, messages, rtp);
             commands = new TravelCommands(this, destinations, engine, messages, menus, tpa, rtp, storage);
@@ -137,6 +144,7 @@ public final class PlexonTravel extends JavaPlugin implements Listener {
             }
             getServer().getPluginManager().registerEvents(this, this);
             getServer().getPluginManager().registerEvents(menus, this);
+            getServer().getPluginManager().registerEvents(voidRescue, this);
             registerCommands();
             engine.startTicker();
             tpa.startTicker();
@@ -144,10 +152,13 @@ public final class PlexonTravel extends JavaPlugin implements Listener {
             core.modules().updateState(MODULE_ID, this, ModuleState.READY,
                 "Core " + core.version().pluginVersion() + " / API " + core.version().apiVersion()
                     + "; per-world destinations=" + (destinations.worldSpawnCount() + destinations.worldHubCount())
+                    + "; RTP profiles=" + worldSettings.explicitRtpCount()
+                    + "; void rules=" + worldSettings.explicitVoidCount()
                     + "; warps=" + destinations.warpCount());
             clearStartupFailureReport();
             getLogger().info("STARTUP_READY version=" + getPluginMeta().getVersion()
-                + " core=" + core.version().pluginVersion() + " warps=" + destinations.warpCount());
+                + " core=" + core.version().pluginVersion() + " warps=" + destinations.warpCount()
+                + " rtp_profiles=" + worldSettings.explicitRtpCount() + " void_rules=" + worldSettings.explicitVoidCount());
             getLogger().info("PlexonTravel " + getPluginMeta().getVersion() + " enabled against PlexonCore " + core.version().pluginVersion());
         } catch (Exception | LinkageError failure) {
             failStartup("Unexpected startup failure during " + startupPhase + ": " + failure.getMessage(), failure);
@@ -218,6 +229,7 @@ public final class PlexonTravel extends JavaPlugin implements Listener {
     @Override
     public void onDisable() {
         if (tpa != null) tpa.shutdown();
+        if (voidRescue != null) voidRescue.shutdown();
         if (rtp != null) rtp.shutdown();
         if (engine != null) engine.shutdown();
         if (getServer() != null) getServer().getServicesManager().unregisterAll(this);
@@ -299,7 +311,9 @@ public final class PlexonTravel extends JavaPlugin implements Listener {
     PlexonCoreAPI core() { return core; }
     DestinationRegistry destinations() { return destinations; }
     TravelEngine engine() { return engine; }
+    WorldSettingsManager worldSettings() { return worldSettings; }
     RtpService rtp() { return rtp; }
+    VoidRescueService voidRescue() { return voidRescue; }
     TpaService tpa() { return tpa; }
     TravelMessages messages() { return messages; }
     void fire(Event event) { getServer().getPluginManager().callEvent(event); }
@@ -326,9 +340,10 @@ public final class PlexonTravel extends JavaPlugin implements Listener {
     public void onDeath(PlayerDeathEvent event) {
         Player player = event.getEntity();
         UUID playerId = player.getUniqueId();
+        boolean rescueInFlight = voidRescue != null && voidRescue.isInFlight(playerId);
         if (engine != null) engine.cancel(playerId, CancelReason.DIED);
         if (rtp != null) rtp.cancel(playerId);
-        if (destinations != null && getConfig().getBoolean("back.capture.deaths", true)) {
+        if (!rescueInFlight && destinations != null && getConfig().getBoolean("back.capture.deaths", true)) {
             destinations.setBack(playerId, player.getLocation(), "death");
         }
     }
@@ -337,7 +352,7 @@ public final class PlexonTravel extends JavaPlugin implements Listener {
     public void onWorldChange(PlayerChangedWorldEvent event) {
         if (engine == null) return;
         UUID playerId = event.getPlayer().getUniqueId();
-        if (engine.isInternal(playerId)) return;
+        if (engine.isInternal(playerId) || (voidRescue != null && voidRescue.isInternal(playerId))) return;
         if (rtp != null) rtp.cancel(playerId);
         engine.cancel(playerId, CancelReason.WORLD_CHANGED);
     }
@@ -346,7 +361,7 @@ public final class PlexonTravel extends JavaPlugin implements Listener {
     public void onTeleport(PlayerTeleportEvent event) {
         if (engine == null || destinations == null) return;
         UUID playerId = event.getPlayer().getUniqueId();
-        if (engine.isInternal(playerId)) return;
+        if (engine.isInternal(playerId) || (voidRescue != null && voidRescue.isInternal(playerId))) return;
         engine.cancel(playerId, CancelReason.REPLACED);
         if (!getConfig().getBoolean("back.capture.external-teleports", true)) return;
         boolean portal = event.getCause() == PlayerTeleportEvent.TeleportCause.NETHER_PORTAL
