@@ -2,7 +2,7 @@ name: PlexonTravel
 version: '${project.version}'
 main: com.plexon.travel.PlexonTravel
 api-version: '26.2'
-description: Core-native spawn, hub, back and warp travel for PlexonCraft.
+description: Core-native per-world travel, warps, TPA and RTP runtime for PlexonCraft.
 author: ZpkDxGames
 depend:
   - PlexonCore
@@ -11,35 +11,69 @@ softdepend:
   - PlaceholderAPI
   - PlexonRanks
   - PlexonQuests
+  - PlexonGPFlags
+loadbefore:
+  - Essentials
+  - WorldSpawn
+  - BetterRTP
+
 commands:
   spawn:
-    description: Travel to server spawn.
+    description: Travel to the current world's PlexonTravel spawn.
     permission: plexontravel.spawn
   hub:
-    description: Travel to the configured hub.
+    description: Travel to the current world's PlexonTravel hub route.
     permission: plexontravel.hub
   back:
     description: Return to the previous meaningful location.
     permission: plexontravel.back
   warp:
-    description: Travel to a warp.
+    description: Travel to a warp or open the warp browser.
     usage: /warp [name]
     permission: plexontravel.warp
   warps:
     description: Open the warp browser.
     permission: plexontravel.warps
+  travel:
+    description: Open the PlexonTravel player help GUI.
+    permission: plexontravel.travel
+  rtp:
+    description: Open random teleport or search immediately with /rtp now.
+    usage: /rtp [now]
+    permission: plexontravel.rtp
+  tpa:
+    description: Request to teleport to another player.
+    usage: /tpa <player>
+    permission: plexontravel.tpa
+  tpahere:
+    description: Request another player to teleport to you.
+    usage: /tpahere <player>
+    permission: plexontravel.tpa
+  tpaccept:
+    description: Accept a pending teleport request.
+    usage: /tpaccept [player]
+    permission: plexontravel.tpa
+  tpdeny:
+    description: Deny a pending teleport request.
+    usage: /tpdeny [player]
+    permission: plexontravel.tpa
+  tpcancel:
+    description: Cancel your outgoing teleport request.
+    permission: plexontravel.tpa
   setspawn:
-    description: Set the PlexonTravel spawn.
+    description: Set this world's spawn; use global for the legacy fallback.
+    usage: /setspawn [global]
     permission: plexontravel.admin.destinations
   sethub:
-    description: Set the PlexonTravel hub.
+    description: Set this world's hub; use global for the legacy fallback.
+    usage: /sethub [global]
     permission: plexontravel.admin.destinations
   setwarp:
     description: Create or update a warp.
     usage: /setwarp <name>
     permission: plexontravel.admin.warps
   delwarp:
-    description: Delete a warp.
+    description: Delete a warp with confirmation.
     usage: /delwarp <name>
     permission: plexontravel.admin.warps
   renamewarp:
@@ -47,11 +81,13 @@ commands:
     usage: /renamewarp <id> <display name...>
     permission: plexontravel.admin.warps
   ptravel:
-    description: Staging-safe travel command namespace.
-    usage: /ptravel <spawn|hub|back|warp|warps>
+    description: Namespaced travel command for staging and conflict recovery.
+    usage: /ptravel <spawn|hub|back|warp|warps|rtp|travel>
+    permission: plexontravel.travel
   traveladmin:
     description: PlexonTravel administration and diagnostics.
     permission: plexontravel.admin
+
 permissions:
   plexontravel.spawn:
     default: true
@@ -62,6 +98,12 @@ permissions:
   plexontravel.warp:
     default: true
   plexontravel.warps:
+    default: true
+  plexontravel.travel:
+    default: true
+  plexontravel.rtp:
+    default: true
+  plexontravel.tpa:
     default: true
   plexontravel.cooldown.bypass:
     default: op
