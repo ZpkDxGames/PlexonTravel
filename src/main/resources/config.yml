@@ -49,7 +49,7 @@ safe-teleport:
   horizontal-radius: 3
   vertical-radius: 4
   # Never synchronously generate terrain while resolving spawn/hub/warp/API destinations.
-  # Set true only if travel is intentionally allowed to create new chunks.
+  # Void rescue also fails closed when a required target chunk is unavailable and generation is false.
   generate-chunks: false
 
 destinations:
@@ -79,6 +79,10 @@ tpa:
   request-timeout-seconds: 30
   allow-cross-world: true
 
+# These 3.0.x RTP keys remain the compatibility/default policy in 3.1.
+# If a world has no explicit profile in world-settings.yml, PlexonTravel resolves
+# an ANNULUS profile from these values and the allowed-worlds list exactly as 3.0.x did.
+# Use /traveladmin rtp ... to create an explicit per-world 3.1 profile.
 rtp:
   enabled: true
   allowed-worlds:
@@ -94,6 +98,11 @@ rtp:
   max-attempts: 24
   # false avoids creating new terrain during RTP. Recommended for Chunky-pregenerated worlds.
   generate-chunks: false
+
+# Per-world RTP boundary profiles and void-rescue rules are stored transactionally
+# in world-settings.yml. Void rescue is disabled unless explicitly enabled per world.
+# Supported RTP modes there: ANNULUS, RECTANGLE, WORLD_BORDER.
+# Supported void destinations: PLEXON_SPAWN, PLEXON_HUB, WORLD_SPAWN, FIXED.
 
 join:
   teleport-to-spawn: false

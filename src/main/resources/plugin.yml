@@ -2,7 +2,7 @@ name: PlexonTravel
 version: '${project.version}'
 main: com.plexon.travel.PlexonTravel
 api-version: '26.2'
-description: Core-native per-world travel, warps, TPA and RTP runtime for PlexonCraft.
+description: Core-native per-world travel, warps, TPA, RTP boundaries and void rescue for PlexonCraft.
 author: ZpkDxGames
 depend:
   - PlexonCore
@@ -85,7 +85,7 @@ commands:
     usage: /ptravel <spawn|hub|back|warp|warps|rtp|travel>
     permission: plexontravel.travel
   traveladmin:
-    description: PlexonTravel administration and diagnostics.
+    description: PlexonTravel administration, RTP boundaries, void rescue and diagnostics.
     permission: plexontravel.admin
 
 permissions:
@@ -111,6 +111,9 @@ permissions:
     default: op
   plexontravel.fee.bypass:
     default: op
+  plexontravel.voidrescue.bypass:
+    description: Bypass automatic void rescue for administration/debugging.
+    default: op
   plexontravel.admin:
     default: op
     children:
@@ -119,6 +122,8 @@ permissions:
       plexontravel.admin.warps: true
       plexontravel.admin.migrate: true
       plexontravel.admin.diagnostics: true
+      plexontravel.admin.rtp: true
+      plexontravel.admin.void: true
   plexontravel.admin.reload:
     default: op
   plexontravel.admin.destinations:
@@ -128,4 +133,10 @@ permissions:
   plexontravel.admin.migrate:
     default: op
   plexontravel.admin.diagnostics:
+    default: op
+  plexontravel.admin.rtp:
+    description: View and mutate per-world RTP profiles and run bounded tests.
+    default: op
+  plexontravel.admin.void:
+    description: View and mutate per-world void rescue rules.
     default: op

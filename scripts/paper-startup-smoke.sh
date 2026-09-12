@@ -97,6 +97,12 @@ fi
 grep -Fq "[PlexonCore] ${CORE_VERSION} enabled" "${log}"
 grep -Fq "[PlexonTravel] STARTUP_READY version=${VERSION} core=${CORE_VERSION}" "${log}"
 grep -Fq "[PlexonTravel] PlexonTravel ${VERSION} enabled against PlexonCore ${CORE_VERSION}" "${log}"
+world_settings="${WORK}/plugins/PlexonTravel/world-settings.yml"
+if [[ ! -f "${world_settings}" ]] || ! grep -Eq '^schema-version:[[:space:]]*1[[:space:]]*$' "${world_settings}"; then
+  echo "PlexonTravel 3.1 world-settings.yml was not created/loaded with schema-version 1" >&2
+  [[ -f "${world_settings}" ]] && cat "${world_settings}" >&2
+  exit 1
+fi
 if [[ -f "${WORK}/plugins/PlexonTravel/startup-failure.txt" ]]; then
   echo "PlexonTravel left startup-failure.txt after successful startup" >&2
   cat "${WORK}/plugins/PlexonTravel/startup-failure.txt" >&2
@@ -120,6 +126,7 @@ plexoncore_version=${CORE_VERSION}
 plexoncore_sha256=${CORE_SHA256}
 plexontravel_version=${VERSION}
 regression_fixture=legacy-2.0.0-config-with-inherited-3.x-defaults
+world_settings_schema=1
 core_evidence=${core_line}
 travel_evidence=${travel_line}
 paper_evidence=${paper_line}

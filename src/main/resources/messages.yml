@@ -54,12 +54,17 @@ tpa:
   expired: '<yellow>Your teleport request expired.</yellow>'
 
 rtp:
-  disabled: '<red>Random teleport is disabled.</red>'
+  disabled: '<red>Random teleport is disabled in this world.</red>'
   world-not-allowed: '<red>RTP is not available in this world.</red>'
+  invalid-profile: '<red>This world has no valid RTP area inside its current world border.</red>'
   already-searching: '<yellow>A safe RTP destination is already being searched.</yellow>'
-  searching: '<gray>Searching for a safe location between the configured minimum and maximum radius...</gray>'
+  searching: '<gray>Searching for a safe location inside this world''s configured RTP boundary...</gray>'
   cancelled-world-change: '<yellow>RTP search cancelled because you changed worlds.</yellow>'
   failed: '<red>No safe RTP location was found. Try again.</red>'
+
+void-rescue:
+  success: '<aqua>You were rescued from the void.</aqua>'
+  failed: '<red>Void rescue failed. An administrator should verify this world''s rescue destination.</red>'
 
 gui:
   help-title: '<gradient:#22d3ee:#38bdf8><bold>Plexon Travel</bold></gradient>'

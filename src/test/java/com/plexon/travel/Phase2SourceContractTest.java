@@ -52,11 +52,41 @@ class Phase2SourceContractTest {
     @Test
     void rtpUsesBoundedCancelableAsyncChunkSearch() throws Exception {
         String source = source("RtpService.java");
-        assertTrue(source.contains("max-attempts"));
+        assertTrue(source.contains("profile.maxAttempts()"));
         assertTrue(source.contains("searching.contains(playerId)"));
         assertTrue(source.contains("isChunkGenerated"));
         assertTrue(source.contains("getChunkAtAsync"));
-        assertTrue(source.contains("generate-chunks"));
+        assertTrue(source.contains("generateChunks()"));
+        assertFalse(source.contains("while (true)"));
+    }
+
+    @Test
+    void perWorldPolicyHotPathDoesNotParseYamlOrTouchDatabase() throws Exception {
+        String rtp = source("RtpService.java");
+        String rescue = source("VoidRescueService.java");
+        assertFalse(rtp.contains("YamlConfiguration"));
+        assertFalse(rtp.contains("java.sql"));
+        assertFalse(rescue.contains("YamlConfiguration"));
+        assertFalse(rescue.contains("java.sql"));
+        assertTrue(rescue.contains("worldSettings.voidRule(world)"));
+    }
+
+    @Test
+    void voidRescueIsDeduplicatedAndDoesNotUseNormalTravelRequest() throws Exception {
+        String source = source("VoidRescueService.java");
+        assertTrue(source.contains("if (!inFlight.add(playerId)) return"));
+        assertTrue(source.contains("teleportAsync"));
+        assertTrue(source.contains("internalTeleports.add(playerId)"));
+        assertFalse(source.contains("engine.request("));
+        assertFalse(source.contains("dispatchCommand"));
+    }
+
+    @Test
+    void voidRescueCannotPolluteBackHistory() throws Exception {
+        String plugin = source("PlexonTravel.java");
+        assertTrue(plugin.contains("voidRescue.isInternal(playerId)"));
+        assertTrue(plugin.contains("boolean rescueInFlight = voidRescue != null && voidRescue.isInFlight(playerId)"));
+        assertTrue(plugin.contains("if (!rescueInFlight && destinations != null"));
     }
 
     @Test
@@ -94,6 +124,7 @@ class Phase2SourceContractTest {
         assertTrue(source.contains("STARTUP_PHASE="));
         assertTrue(source.contains("STARTUP_READY version="));
         assertTrue(source.contains("startup-failure.txt"));
+        assertTrue(source.contains("worldSettings.load()"));
     }
 
     @Test
@@ -105,9 +136,9 @@ class Phase2SourceContractTest {
     }
 
     @Test
-    void releaseLineIs302OnCore205() throws Exception {
+    void releaseLineIs310OnCore205() throws Exception {
         String pom = Files.readString(Path.of("pom.xml"));
-        assertTrue(pom.contains("<version>3.0.2</version>"));
+        assertTrue(pom.contains("<version>3.1.0</version>"));
         assertTrue(pom.contains("<core.version>2.0.5</core.version>"));
     }
 }

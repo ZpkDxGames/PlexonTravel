@@ -5,11 +5,11 @@ import org.bukkit.Bukkit;
 import org.bukkit.HeightMap;
 import org.bukkit.Location;
 import org.bukkit.World;
+import org.bukkit.WorldBorder;
 import org.bukkit.entity.Player;
 
-import java.util.List;
-import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -21,15 +21,17 @@ final class RtpService {
     private final PlexonTravel plugin;
     private final TravelEngine engine;
     private final TravelMessages messages;
+    private final WorldSettingsManager worldSettings;
     private final Set<UUID> searching = ConcurrentHashMap.newKeySet();
     private final LongAdder searches = new LongAdder();
     private final LongAdder found = new LongAdder();
     private final LongAdder exhausted = new LongAdder();
 
-    RtpService(PlexonTravel plugin, TravelEngine engine, TravelMessages messages) {
+    RtpService(PlexonTravel plugin, TravelEngine engine, TravelMessages messages, WorldSettingsManager worldSettings) {
         this.plugin = plugin;
         this.engine = engine;
         this.messages = messages;
+        this.worldSettings = worldSettings;
     }
 
     boolean begin(Player player) {
@@ -37,12 +39,16 @@ final class RtpService {
             messages.send(player, "commands.no-permission", "<red>You do not have permission.</red>");
             return false;
         }
-        if (!plugin.getConfig().getBoolean("rtp.enabled", true)) {
-            messages.send(player, "rtp.disabled", "<red>Random teleport is disabled.</red>");
+        World world = player.getWorld();
+        RtpProfile profile = worldSettings.rtpProfile(world);
+        if (!profile.enabled()) {
+            messages.send(player, profile.source() == RtpProfileSource.LEGACY ? "rtp.world-not-allowed" : "rtp.disabled",
+                "<red>Random teleport is disabled in this world.</red>");
             return false;
         }
-        if (!isAllowed(player.getWorld())) {
-            messages.send(player, "rtp.world-not-allowed", "<red>RTP is not available in this world.</red>");
+        Optional<ResolvedBoundary> resolved = resolveBoundary(world, profile);
+        if (resolved.isEmpty()) {
+            messages.send(player, "rtp.invalid-profile", "<red>This world's RTP boundary has no valid area inside the world border.</red>");
             return false;
         }
         long remaining = engine.cooldownRemainingMillis(player, TravelType.RTP);
@@ -58,10 +64,9 @@ final class RtpService {
         }
 
         searches.increment();
-        messages.send(player, "rtp.searching", "<gray>Searching for a safe location...</gray>");
-        World world = player.getWorld();
+        messages.send(player, "rtp.searching", "<gray>Searching for a safe location inside this world's RTP boundary...</gray>");
         UUID worldId = world.getUID();
-        search(world, playerId).whenComplete((destination, failure) -> runSync(() -> {
+        search(world, playerId, profile, resolved.get()).whenComplete((destination, failure) -> runSync(() -> {
             if (!searching.remove(playerId)) return;
             if (!player.isOnline()) return;
             if (!player.getWorld().getUID().equals(worldId)) {
@@ -79,106 +84,174 @@ final class RtpService {
         return true;
     }
 
-    void cancel(UUID playerId) {
-        searching.remove(playerId);
+    void cancel(UUID playerId) { searching.remove(playerId); }
+    void shutdown() { searching.clear(); }
+    boolean isSearching(UUID playerId) { return searching.contains(playerId); }
+    boolean isAllowed(World world) { return worldSettings.rtpProfile(world).enabled(); }
+    RtpProfile profile(World world) { return worldSettings.rtpProfile(world); }
+
+    // Kept for the existing player RTP menu/source compatibility. New code should use profile(World).
+    double minRadius() { return plugin.getConfig().getDouble("rtp.min-radius", 2000D); }
+    double maxRadius() { return plugin.getConfig().getDouble("rtp.max-radius", 10000D); }
+
+    String describe(World world) {
+        RtpProfile profile = worldSettings.rtpProfile(world);
+        return resolveBoundary(world, profile).map(ResolvedBoundary::describe).orElse("INVALID / NO EFFECTIVE AREA");
     }
 
-    void shutdown() {
-        searching.clear();
-    }
-
-    boolean isSearching(UUID playerId) {
-        return searching.contains(playerId);
-    }
-
-    boolean isAllowed(World world) {
-        List<String> configured = plugin.getConfig().getStringList("rtp.allowed-worlds");
-        if (configured.isEmpty()) configured = List.of("Survival_World");
-        String name = world.getName();
-        return configured.stream().anyMatch(value -> value.equalsIgnoreCase(name));
-    }
-
-    double minRadius() {
-        return Math.max(0D, plugin.getConfig().getDouble("rtp.min-radius", 2000D));
-    }
-
-    double maxRadius() {
-        return Math.max(minRadius() + 1D, plugin.getConfig().getDouble("rtp.max-radius", 10000D));
-    }
-
-    Location center(World world) {
-        String mode = plugin.getConfig().getString("rtp.center.mode", "WORLD_SPAWN").toUpperCase(Locale.ROOT);
-        if (mode.equals("CONFIGURED")) {
-            return new Location(world, plugin.getConfig().getDouble("rtp.center.x", 0D), world.getSpawnLocation().getY(),
-                plugin.getConfig().getDouble("rtp.center.z", 0D));
-        }
-        return world.getSpawnLocation();
-    }
-
-    private CompletableFuture<Destination> search(World world, UUID playerId) {
-        CompletableFuture<Destination> future = new CompletableFuture<>();
-        Location center = center(world);
-        int attempts = Math.max(1, Math.min(64, plugin.getConfig().getInt("rtp.max-attempts", 24)));
-        searchAttempt(world, playerId, center.getX(), center.getZ(), minRadius(), maxRadius(), 0, attempts, future);
-        return future;
-    }
-
-    private void searchAttempt(World world, UUID playerId, double centerX, double centerZ, double minRadius, double maxRadius,
-                               int attempt, int maxAttempts, CompletableFuture<Destination> future) {
-        if (future.isDone()) return;
-        if (!searching.contains(playerId)) {
-            future.complete(null);
-            return;
-        }
-        if (attempt >= maxAttempts) {
-            future.complete(null);
-            return;
-        }
-
-        RtpGeometry.Point point = RtpGeometry.sampleAnnulus(centerX, centerZ, minRadius, maxRadius, ThreadLocalRandom.current());
-        int chunkX = point.x() >> 4;
-        int chunkZ = point.z() >> 4;
-        Location borderProbe = new Location(world, point.x() + 0.5D, world.getSpawnLocation().getY(), point.z() + 0.5D);
-        if (!world.getWorldBorder().isInside(borderProbe)) {
-            searchAttempt(world, playerId, centerX, centerZ, minRadius, maxRadius, attempt + 1, maxAttempts, future);
-            return;
-        }
-
-        boolean generate = plugin.getConfig().getBoolean("rtp.generate-chunks", false);
-        if (!generate && !world.isChunkGenerated(chunkX, chunkZ)) {
-            searchAttempt(world, playerId, centerX, centerZ, minRadius, maxRadius, attempt + 1, maxAttempts, future);
-            return;
-        }
-
-        world.getChunkAtAsync(chunkX, chunkZ, generate).whenComplete((chunk, failure) -> runSync(() -> {
-            if (future.isDone()) return;
-            if (!searching.contains(playerId)) {
-                future.complete(null);
-                return;
+    RtpTestResult test(World world, int requestedSamples) {
+        int samples = Math.max(1, Math.min(256, requestedSamples));
+        RtpProfile profile = worldSettings.rtpProfile(world);
+        Optional<ResolvedBoundary> resolved = resolveBoundary(world, profile);
+        if (resolved.isEmpty()) return new RtpTestResult(profile, 0, samples, samples, 0, 0, 0, 0, 0, true);
+        ResolvedBoundary boundary = resolved.get();
+        int valid = 0;
+        int rejected = 0;
+        int ungenerated = 0;
+        int minX = Integer.MAX_VALUE;
+        int maxX = Integer.MIN_VALUE;
+        int minZ = Integer.MAX_VALUE;
+        int maxZ = Integer.MIN_VALUE;
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        for (int i = 0; i < samples; i++) {
+            RtpGeometry.Point point = boundary.sample(random);
+            minX = Math.min(minX, point.x());
+            maxX = Math.max(maxX, point.x());
+            minZ = Math.min(minZ, point.z());
+            maxZ = Math.max(maxZ, point.z());
+            if (!boundary.contains(point.x() + 0.5D, point.z() + 0.5D)
+                || !world.getWorldBorder().isInside(new Location(world, point.x() + 0.5D, world.getSpawnLocation().getY(), point.z() + 0.5D))) {
+                rejected++;
+                continue;
             }
-            if (failure != null || chunk == null) {
-                searchAttempt(world, playerId, centerX, centerZ, minRadius, maxRadius, attempt + 1, maxAttempts, future);
-                return;
+            int chunkX = point.x() >> 4;
+            int chunkZ = point.z() >> 4;
+            if (!profile.generateChunks() && !world.isChunkGenerated(chunkX, chunkZ)) {
+                ungenerated++;
+                rejected++;
+                continue;
             }
-            int y = world.getHighestBlockYAt(point.x(), point.z(), HeightMap.MOTION_BLOCKING_NO_LEAVES) + 1;
-            Location candidate = new Location(world, point.x() + 0.5D, y, point.z() + 0.5D,
-                ThreadLocalRandom.current().nextFloat() * 360F - 180F, 0F);
-            if (engine.isSafe(candidate)) {
-                future.complete(Destination.from(candidate));
-            } else {
-                searchAttempt(world, playerId, centerX, centerZ, minRadius, maxRadius, attempt + 1, maxAttempts, future);
+            valid++;
+        }
+        return new RtpTestResult(profile, valid, rejected, Math.max(0, samples - valid), ungenerated,
+            minX == Integer.MAX_VALUE ? 0 : minX, maxX == Integer.MIN_VALUE ? 0 : maxX,
+            minZ == Integer.MAX_VALUE ? 0 : minZ, maxZ == Integer.MIN_VALUE ? 0 : maxZ, false);
+    }
+
+    private CompletableFuture<Destination> search(World world, UUID playerId, RtpProfile profile, ResolvedBoundary boundary) {
+        SearchState state = new SearchState(world, playerId, profile, boundary);
+        state.nextAttempt();
+        return state.future;
+    }
+
+    private Optional<ResolvedBoundary> resolveBoundary(World world, RtpProfile profile) {
+        RtpGeometry.Bounds border = worldBorderBounds(world);
+        if (border.empty()) return Optional.empty();
+        return switch (profile.boundaryMode()) {
+            case ANNULUS -> {
+                Location center = profile.centerMode() == RtpCenterMode.CONFIGURED
+                    ? new Location(world, profile.centerX(), world.getSpawnLocation().getY(), profile.centerZ())
+                    : world.getSpawnLocation();
+                if (!RtpGeometry.annulusIntersects(center.getX(), center.getZ(), profile.minRadius(), profile.maxRadius(), border)) yield Optional.empty();
+                yield Optional.of(new AnnulusBoundary(center.getX(), center.getZ(), profile.minRadius(), profile.maxRadius(), border));
             }
-        }));
+            case RECTANGLE -> {
+                RtpGeometry.Bounds configured = new RtpGeometry.Bounds(profile.minX(), profile.maxX(), profile.minZ(), profile.maxZ());
+                RtpGeometry.Bounds effective = RtpGeometry.intersect(configured, border);
+                yield effective.empty() ? Optional.empty() : Optional.of(new RectangleBoundary(effective));
+            }
+            case WORLD_BORDER -> {
+                RtpGeometry.Bounds effective = RtpGeometry.padded(border, profile.worldBorderPadding());
+                yield effective.empty() ? Optional.empty() : Optional.of(new WorldBorderBoundary(effective, profile.worldBorderPadding()));
+            }
+        };
+    }
+
+    private RtpGeometry.Bounds worldBorderBounds(World world) {
+        WorldBorder border = world.getWorldBorder();
+        Location center = border.getCenter();
+        double half = border.getSize() / 2D;
+        RtpGeometry.Bounds raw = new RtpGeometry.Bounds(center.getX() - half, center.getX() + half, center.getZ() - half, center.getZ() + half);
+        RtpGeometry.Bounds minecraft = new RtpGeometry.Bounds(-29_999_984D, 29_999_984D, -29_999_984D, 29_999_984D);
+        return RtpGeometry.intersect(raw, minecraft);
     }
 
     private void runSync(Runnable action) {
         if (!plugin.isEnabled()) return;
-        if (Bukkit.isPrimaryThread()) action.run();
-        else Bukkit.getScheduler().runTask(plugin, action);
+        if (Bukkit.isPrimaryThread()) action.run(); else Bukkit.getScheduler().runTask(plugin, action);
     }
 
     long searchCount() { return searches.sum(); }
     long foundCount() { return found.sum(); }
     long exhaustedCount() { return exhausted.sum(); }
     int activeSearches() { return searching.size(); }
+
+    record RtpTestResult(RtpProfile profile, int validSamples, int rejectedSamples, int exhaustedSamples, int ungeneratedRejected,
+                         int minX, int maxX, int minZ, int maxZ, boolean invalidBoundary) {}
+
+    private interface ResolvedBoundary {
+        RtpGeometry.Point sample(ThreadLocalRandom random);
+        boolean contains(double x, double z);
+        String describe();
+    }
+
+    private record AnnulusBoundary(double centerX, double centerZ, double minRadius, double maxRadius, RtpGeometry.Bounds border) implements ResolvedBoundary {
+        @Override public RtpGeometry.Point sample(ThreadLocalRandom random) { return RtpGeometry.sampleAnnulus(centerX, centerZ, minRadius, maxRadius, random); }
+        @Override public boolean contains(double x, double z) { double distance = Math.hypot(x - centerX, z - centerZ); return distance >= minRadius && distance <= maxRadius && border.contains(x, z); }
+        @Override public String describe() { return "ANNULUS center=" + Math.round(centerX) + "," + Math.round(centerZ) + " radius=" + Math.round(minRadius) + ".." + Math.round(maxRadius); }
+    }
+
+    private record RectangleBoundary(RtpGeometry.Bounds bounds) implements ResolvedBoundary {
+        @Override public RtpGeometry.Point sample(ThreadLocalRandom random) { return RtpGeometry.sampleRectangle(bounds, random); }
+        @Override public boolean contains(double x, double z) { return bounds.contains(x, z); }
+        @Override public String describe() { return "RECTANGLE x=" + Math.round(bounds.minX()) + ".." + Math.round(bounds.maxX()) + " z=" + Math.round(bounds.minZ()) + ".." + Math.round(bounds.maxZ()); }
+    }
+
+    private record WorldBorderBoundary(RtpGeometry.Bounds bounds, double padding) implements ResolvedBoundary {
+        @Override public RtpGeometry.Point sample(ThreadLocalRandom random) { return RtpGeometry.sampleRectangle(bounds, random); }
+        @Override public boolean contains(double x, double z) { return bounds.contains(x, z); }
+        @Override public String describe() { return "WORLD_BORDER padding=" + Math.round(padding); }
+    }
+
+    private final class SearchState {
+        private final World world;
+        private final UUID playerId;
+        private final RtpProfile profile;
+        private final ResolvedBoundary boundary;
+        private final CompletableFuture<Destination> future = new CompletableFuture<>();
+        private int attempt;
+
+        private SearchState(World world, UUID playerId, RtpProfile profile, ResolvedBoundary boundary) {
+            this.world = world;
+            this.playerId = playerId;
+            this.profile = profile;
+            this.boundary = boundary;
+        }
+
+        private void nextAttempt() {
+            if (future.isDone()) return;
+            ThreadLocalRandom random = ThreadLocalRandom.current();
+            while (attempt < profile.maxAttempts()) {
+                if (!searching.contains(playerId)) { future.complete(null); return; }
+                attempt++;
+                RtpGeometry.Point point = boundary.sample(random);
+                if (!boundary.contains(point.x() + 0.5D, point.z() + 0.5D)) continue;
+                Location borderProbe = new Location(world, point.x() + 0.5D, world.getSpawnLocation().getY(), point.z() + 0.5D);
+                if (!world.getWorldBorder().isInside(borderProbe)) continue;
+                int chunkX = point.x() >> 4;
+                int chunkZ = point.z() >> 4;
+                if (!profile.generateChunks() && !world.isChunkGenerated(chunkX, chunkZ)) continue;
+                world.getChunkAtAsync(chunkX, chunkZ, profile.generateChunks()).whenComplete((chunk, failure) -> runSync(() -> {
+                    if (future.isDone()) return;
+                    if (!searching.contains(playerId)) { future.complete(null); return; }
+                    if (failure != null || chunk == null) { nextAttempt(); return; }
+                    int y = world.getHighestBlockYAt(point.x(), point.z(), HeightMap.MOTION_BLOCKING_NO_LEAVES) + 1;
+                    Location candidate = new Location(world, point.x() + 0.5D, y, point.z() + 0.5D, ThreadLocalRandom.current().nextFloat() * 360F - 180F, 0F);
+                    if (engine.isSafe(candidate)) future.complete(Destination.from(candidate)); else nextAttempt();
+                }));
+                return;
+            }
+            future.complete(null);
+        }
+    }
 }

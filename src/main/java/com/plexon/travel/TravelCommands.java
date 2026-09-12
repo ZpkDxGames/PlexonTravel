@@ -22,7 +22,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Set;
 
 final class TravelCommands implements CommandExecutor, TabCompleter {
@@ -38,6 +37,7 @@ final class TravelCommands implements CommandExecutor, TabCompleter {
     private final TpaService tpa;
     private final RtpService rtp;
     private final TravelStorage storage;
+    private final TravelWorldAdmin worldAdmin;
     private final DestructiveConfirmationGate deleteGate = new DestructiveConfirmationGate(15_000L);
 
     TravelCommands(PlexonTravel plugin, DestinationRegistry destinations, TravelEngine engine, TravelMessages messages,
@@ -50,6 +50,7 @@ final class TravelCommands implements CommandExecutor, TabCompleter {
         this.tpa = tpa;
         this.rtp = rtp;
         this.storage = storage;
+        this.worldAdmin = new TravelWorldAdmin(plugin, messages, rtp);
     }
 
     @Override
@@ -59,7 +60,6 @@ final class TravelCommands implements CommandExecutor, TabCompleter {
             messages.send(sender, "commands.takeover-disabled", "<yellow>Standard travel command takeover is disabled. Use <white>/ptravel</white> while staging.</yellow>");
             return true;
         }
-
         return switch (name) {
             case "spawn" -> player(sender, plugin::requestSpawn);
             case "hub" -> player(sender, plugin::requestHub);
@@ -208,9 +208,7 @@ final class TravelCommands implements CommandExecutor, TabCompleter {
     }
 
     private boolean ptravel(CommandSender sender, String[] args) {
-        if (args.length == 0) {
-            return player(sender, p -> { menus.openHelp(p); return true; });
-        }
+        if (args.length == 0) return player(sender, p -> { menus.openHelp(p); return true; });
         String sub = args[0].toLowerCase(Locale.ROOT);
         String[] rest = Arrays.copyOfRange(args, 1, args.length);
         return switch (sub) {
@@ -228,16 +226,20 @@ final class TravelCommands implements CommandExecutor, TabCompleter {
     private boolean admin(CommandSender sender, String[] args) {
         if (!sender.hasPermission("plexontravel.admin")) return noPermission(sender);
         if (args.length == 0) {
-            messages.sendRaw(sender, "<yellow>Usage: <white>/traveladmin &lt;reload|diagnostics|backup|migrate|setspawn|sethub&gt;</white></yellow>");
+            messages.sendRaw(sender, "<yellow>Usage: <white>/traveladmin &lt;reload|diagnostics|backup|migrate|setspawn|sethub|rtp|void&gt;</white></yellow>");
             return true;
         }
-        return switch (args[0].toLowerCase(Locale.ROOT)) {
+        String sub = args[0].toLowerCase(Locale.ROOT);
+        String[] rest = Arrays.copyOfRange(args, 1, args.length);
+        return switch (sub) {
             case "reload" -> { reload(sender); yield true; }
             case "diagnostics" -> { diagnostics(sender); yield true; }
             case "backup" -> { backup(sender); yield true; }
-            case "migrate" -> { migrate(sender, Arrays.copyOfRange(args, 1, args.length)); yield true; }
-            case "setspawn" -> player(sender, p -> setDestination(p, "spawn", Arrays.copyOfRange(args, 1, args.length)));
-            case "sethub" -> player(sender, p -> setDestination(p, "hub", Arrays.copyOfRange(args, 1, args.length)));
+            case "migrate" -> { migrate(sender, rest); yield true; }
+            case "setspawn" -> player(sender, p -> setDestination(p, "spawn", rest));
+            case "sethub" -> player(sender, p -> setDestination(p, "hub", rest));
+            case "rtp" -> worldAdmin.rtp(sender, rest);
+            case "void" -> worldAdmin.voidRescue(sender, rest);
             default -> { messages.sendRaw(sender, "<red>Unknown admin subcommand.</red>"); yield true; }
         };
     }
@@ -245,15 +247,22 @@ final class TravelCommands implements CommandExecutor, TabCompleter {
     private void reload(CommandSender sender) {
         File file = new File(plugin.getDataFolder(), "config.yml");
         YamlConfiguration candidate = YamlConfiguration.loadConfiguration(file);
-        List<String> errors = TravelConfigValidator.validate(candidate);
+        List<String> errors = new ArrayList<>(TravelConfigValidator.validate(candidate));
+        errors.addAll(plugin.worldSettings().validateDisk());
         if (!errors.isEmpty()) {
             messages.sendRaw(sender, "<red>Reload rejected.</red> <gray>" + String.join("; ", errors) + "</gray>");
             return;
         }
-        plugin.reloadConfig();
-        messages.reload();
-        engine.invalidateWarmupsForReload();
-        messages.sendRaw(sender, "<green>Configuration activated.</green> <gray>Runtime epoch <white>" + engine.runtimeEpoch() + "</white>.</gray>");
+        try {
+            plugin.reloadConfig();
+            plugin.worldSettings().reloadFromDisk();
+            messages.reload();
+            engine.invalidateWarmupsForReload();
+            messages.sendRaw(sender, "<green>Configuration activated.</green> <gray>Main config and world-settings are valid; runtime epoch <white>" + engine.runtimeEpoch() + "</white>.</gray>");
+        } catch (Exception failure) {
+            plugin.getLogger().severe("Transactional reload activation failed after validation: " + failure.getMessage());
+            messages.sendRaw(sender, "<red>Reload activation failed.</red> <gray>" + failure.getMessage() + "</gray>");
+        }
     }
 
     private void diagnostics(CommandSender sender) {
@@ -263,7 +272,9 @@ final class TravelCommands implements CommandExecutor, TabCompleter {
         messages.sendRaw(sender, "<gray>Travel:</gray> <white>pending=" + engine.pendingCount() + ", started=" + engine.startedCount() + ", completed=" + engine.completedCount() + "</white>");
         messages.sendRaw(sender, "<gray>Cancellation:</gray> <white>moved=" + engine.movedCancelledCount() + ", damage=" + engine.damageCancelledCount() + ", unsafe=" + engine.unsafeRejectedCount() + "</white>");
         messages.sendRaw(sender, "<gray>TPA:</gray> <white>active=" + tpa.activeRequests() + ", sent=" + tpa.sentCount() + ", accepted=" + tpa.acceptedCount() + ", denied=" + tpa.deniedCount() + ", expired=" + tpa.expiredCount() + "</white>");
-        messages.sendRaw(sender, "<gray>RTP:</gray> <white>searching=" + rtp.activeSearches() + ", searches=" + rtp.searchCount() + ", found=" + rtp.foundCount() + ", exhausted=" + rtp.exhaustedCount() + "</white>");
+        messages.sendRaw(sender, "<gray>RTP:</gray> <white>searching=" + rtp.activeSearches() + ", searches=" + rtp.searchCount() + ", found=" + rtp.foundCount() + ", exhausted=" + rtp.exhaustedCount() + ", explicit-profiles=" + plugin.worldSettings().explicitRtpCount() + ", legacy-inherited-loaded=" + plugin.worldSettings().legacyInheritedLoadedWorldCount() + "</white>");
+        messages.sendRaw(sender, "<gray>Void rescue:</gray> <white>enabled-worlds=" + plugin.worldSettings().enabledVoidWorldCount() + ", active=" + plugin.voidRescue().activeCount() + ", attempted=" + plugin.voidRescue().attemptedCount() + ", completed=" + plugin.voidRescue().completedCount() + ", failed=" + plugin.voidRescue().failureCount() + "</white>");
+        messages.sendRaw(sender, "<gray>World settings:</gray> <white>schema=" + WorldSettingsManager.SCHEMA_VERSION + ", explicit-void-rules=" + plugin.worldSettings().explicitVoidCount() + "</white>");
         messages.sendRaw(sender, "<gray>Command takeover:</gray> <white>" + plugin.getConfig().getBoolean("commands.takeover-enabled", true) + "</white> <dark_gray>| epoch=" + engine.runtimeEpoch() + "</dark_gray>");
     }
 
@@ -315,25 +326,16 @@ final class TravelCommands implements CommandExecutor, TabCompleter {
                 String filename = file.getFileName().toString();
                 String display = filename.substring(0, filename.length() - 4);
                 String id = DestinationRegistry.normalizeId(display);
-                if (id.isBlank() || destinations.warp(id) != null) {
-                    skipped++;
-                    continue;
-                }
+                if (id.isBlank() || destinations.warp(id) != null) { skipped++; continue; }
                 YamlConfiguration source = YamlConfiguration.loadConfiguration(file.toFile());
                 String worldName = source.getString("world", "");
                 World world = Bukkit.getWorld(worldName);
-                if (world == null) {
-                    unresolved++;
-                    continue;
-                }
+                if (world == null) { unresolved++; continue; }
                 Destination destination = new Destination(world.getUID(), world.getName(), source.getDouble("x"), source.getDouble("y"), source.getDouble("z"),
                     (float) source.getDouble("yaw"), (float) source.getDouble("pitch"));
                 Warp warp = destinations.importWarp(display, destination, "Imported");
                 if (warp == null) skipped++;
-                else {
-                    plugin.fire(new PlexonWarpCreatedEvent(warp.view()));
-                    imported++;
-                }
+                else { plugin.fire(new PlexonWarpCreatedEvent(warp.view())); imported++; }
             }
         } catch (IOException failure) {
             messages.sendRaw(sender, "<red>Migration failed:</red> <gray>" + failure.getMessage() + "</gray>");
@@ -371,9 +373,13 @@ final class TravelCommands implements CommandExecutor, TabCompleter {
         if (name.equals("rtp") && args.length == 1) return prefix(List.of("now"), args[0]);
         if (name.equals("ptravel") && args.length == 1) return prefix(List.of("spawn", "hub", "back", "warp", "warps", "rtp", "travel"), args[0]);
         if (name.equals("ptravel") && args.length == 2 && args[0].equalsIgnoreCase("warp")) return prefix(destinations.warpIds(), args[1]);
-        if (name.equals("traveladmin") && args.length == 1) return prefix(List.of("reload", "diagnostics", "backup", "migrate", "setspawn", "sethub"), args[0]);
-        if (name.equals("traveladmin") && args.length == 2 && args[0].equalsIgnoreCase("migrate")) return prefix(List.of("scan", "plan", "status", "execute"), args[1]);
-        if (name.equals("traveladmin") && args.length == 2 && (args[0].equalsIgnoreCase("setspawn") || args[0].equalsIgnoreCase("sethub"))) return prefix(List.of("global"), args[1]);
+        if (name.equals("traveladmin")) {
+            if (args.length == 1) return prefix(List.of("reload", "diagnostics", "backup", "migrate", "setspawn", "sethub", "rtp", "void"), args[0]);
+            if (args.length >= 2 && args[0].equalsIgnoreCase("rtp")) return worldAdmin.tabRtp(sender, Arrays.copyOfRange(args, 1, args.length));
+            if (args.length >= 2 && args[0].equalsIgnoreCase("void")) return worldAdmin.tabVoid(sender, Arrays.copyOfRange(args, 1, args.length));
+            if (args.length == 2 && args[0].equalsIgnoreCase("migrate")) return prefix(List.of("scan", "plan", "status", "execute"), args[1]);
+            if (args.length == 2 && (args[0].equalsIgnoreCase("setspawn") || args[0].equalsIgnoreCase("sethub"))) return prefix(List.of("global"), args[1]);
+        }
         return List.of();
     }
 
@@ -395,7 +401,5 @@ final class TravelCommands implements CommandExecutor, TabCompleter {
     }
 
     @FunctionalInterface
-    private interface PlayerAction {
-        boolean run(Player player);
-    }
+    private interface PlayerAction { boolean run(Player player); }
 }
