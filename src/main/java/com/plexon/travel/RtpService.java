@@ -90,6 +90,10 @@ final class RtpService {
     boolean isAllowed(World world) { return worldSettings.rtpProfile(world).enabled(); }
     RtpProfile profile(World world) { return worldSettings.rtpProfile(world); }
 
+    // Kept for the existing player RTP menu/source compatibility. New code should use profile(World).
+    double minRadius() { return plugin.getConfig().getDouble("rtp.min-radius", 2000D); }
+    double maxRadius() { return plugin.getConfig().getDouble("rtp.max-radius", 10000D); }
+
     String describe(World world) {
         RtpProfile profile = worldSettings.rtpProfile(world);
         return resolveBoundary(world, profile).map(ResolvedBoundary::describe).orElse("INVALID / NO EFFECTIVE AREA");
