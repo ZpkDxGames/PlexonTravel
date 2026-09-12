@@ -4,6 +4,11 @@ import com.plexon.travel.internal.TravelConfigValidator;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.junit.jupiter.api.Test;
 
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+import java.util.Objects;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -29,6 +34,13 @@ class TravelConfigValidatorTest {
         return c;
     }
 
+    private YamlConfiguration resource(String name) throws Exception {
+        var stream = Objects.requireNonNull(getClass().getResourceAsStream(name), "Missing test resource " + name);
+        try (var reader = new InputStreamReader(stream, StandardCharsets.UTF_8)) {
+            return YamlConfiguration.loadConfiguration(reader);
+        }
+    }
+
     @Test void acceptsDefaultShape() { assertTrue(TravelConfigValidator.validate(valid()).isEmpty()); }
     @Test void acceptsMissingPathsThatWillInheritEmbeddedDefaults() {
         assertTrue(TravelConfigValidator.validate(new YamlConfiguration()).isEmpty());
@@ -39,6 +51,23 @@ class TravelConfigValidatorTest {
         c.set("rtp", null);
         c.set("tpa", null);
         assertTrue(TravelConfigValidator.validate(c).isEmpty());
+    }
+    @Test void acceptsActualLegacy2xFileWithEmbedded3xDefaults() throws Exception {
+        var legacy = resource("/legacy-2.0.0-config.yml");
+        var defaults = resource("/config.yml");
+        legacy.setDefaults(defaults);
+
+        assertFalse(legacy.isSet("destinations.spawn.fallback"));
+        assertFalse(legacy.isSet("destinations.hub.fallback"));
+        assertFalse(legacy.isSet("rtp.center.mode"));
+        assertTrue(legacy.contains("destinations.spawn.fallback"));
+        assertTrue(legacy.contains("destinations.hub.fallback"));
+        assertTrue(legacy.contains("rtp.center.mode"));
+        assertEquals("VANILLA", legacy.getString("destinations.spawn.fallback"));
+        assertEquals("GLOBAL", legacy.getString("destinations.hub.fallback"));
+        assertEquals("WORLD_SPAWN", legacy.getString("rtp.center.mode"));
+        assertTrue(TravelConfigValidator.validate(legacy).isEmpty(),
+            () -> String.join("; ", TravelConfigValidator.validate(legacy)));
     }
     @Test void rejectsNegativeFee() { var c = valid(); c.set("teleport.spawn.fee", -1); assertFalse(TravelConfigValidator.validate(c).isEmpty()); }
     @Test void rejectsNonFiniteMovementThreshold() { var c = valid(); c.set("teleport.movement-threshold", Double.NaN); assertFalse(TravelConfigValidator.validate(c).isEmpty()); }

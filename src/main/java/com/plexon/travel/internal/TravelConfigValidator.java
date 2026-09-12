@@ -11,9 +11,14 @@ public final class TravelConfigValidator {
     private TravelConfigValidator() {}
 
     /**
-     * Validates explicitly configured values. Missing paths are intentionally accepted because
+     * Validates effective configuration values. Missing paths are intentionally accepted because
      * Bukkit applies the embedded config.yml defaults on startup/reload; this also keeps upgrades
      * from rejecting older, smaller config files before those defaults can be merged.
+     *
+     * <p>Important: do not use getString(path, fallback) after contains(path). Bukkit's
+     * contains(path) returns true for inherited defaults, while getString(path, fallback) returns
+     * the method fallback when the value is not explicitly present and ignores root defaults.
+     * Reading the raw effective value with get(path) preserves inherited defaults.</p>
      */
     public static List<String> validate(ConfigurationSection config) {
         List<String> errors = new ArrayList<>();
@@ -82,11 +87,25 @@ public final class TravelConfigValidator {
 
     private static void enumeration(ConfigurationSection config, String path, Set<String> allowed, List<String> errors) {
         if (!config.contains(path)) return;
-        String value = config.getString(path, "").trim().toUpperCase(Locale.ROOT);
-        if (!allowed.contains(value)) errors.add(path + " must be one of " + allowed);
+        Object raw = config.get(path);
+        if (!(raw instanceof String text)) {
+            errors.add(path + " must be one of " + allowed + " (was " + describe(raw) + ")");
+            return;
+        }
+        String value = text.trim().toUpperCase(Locale.ROOT);
+        if (!allowed.contains(value)) {
+            errors.add(path + " must be one of " + allowed + " (was " + describe(text) + ")");
+        }
     }
 
     private static void optionalEnumeration(ConfigurationSection config, String path, Set<String> allowed, List<String> errors) {
         enumeration(config, path, allowed, errors);
+    }
+
+    private static String describe(Object raw) {
+        if (raw == null) return "<missing>";
+        String value = String.valueOf(raw).replace('\n', ' ').replace('\r', ' ').replace('\t', ' ').trim();
+        if (value.length() > 48) value = value.substring(0, 48) + "...";
+        return "'" + value + "'";
     }
 }
