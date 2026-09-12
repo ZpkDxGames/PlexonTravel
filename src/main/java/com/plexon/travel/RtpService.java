@@ -83,6 +83,10 @@ final class RtpService {
         searching.remove(playerId);
     }
 
+    void shutdown() {
+        searching.clear();
+    }
+
     boolean isSearching(UUID playerId) {
         return searching.contains(playerId);
     }
