@@ -2,7 +2,7 @@ name: Build
 
 on:
   push:
-    branches: [main, 'closure/**', 'release/**', 'phase2/**', 'phase3/**']
+    branches: [main, 'closure/**', 'hotfix/**', 'release/**', 'phase2/**', 'phase3/**']
     tags-ignore: ['v*']
   pull_request:
     branches: [main]
@@ -12,13 +12,13 @@ permissions:
   contents: read
 
 env:
-  ACCEPTED_CANDIDATE_SHA: 'c15fa94a6fcfcdbcf1ef52aa92dbb8faa101724a'
+  ACCEPTED_CANDIDATE_SHA: 'a88d1656a75202e71c15d037258771e25e2c123c'
   CORE_SHA256: 'bf4df796e83571e76c06b296c75c5e73ddc8053cb2c587d74c08cd3922e0b4d4'
 
 jobs:
   verify:
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 35
     steps:
       - name: Checkout exact source
         uses: actions/checkout@v7
@@ -53,6 +53,8 @@ jobs:
         run: mvn -B -ntp clean verify
       - name: Verify installable JAR
         run: ./scripts/verify-distribution.sh "target/PlexonTravel-${VERSION}.jar"
+      - name: Real Paper startup smoke
+        run: ./scripts/paper-startup-smoke.sh "${VERSION}" "target/PlexonTravel-${VERSION}.jar"
       - name: Generate exact test and provenance evidence
         shell: bash
         run: |
@@ -69,7 +71,8 @@ jobs:
           pathlib.Path('TEST_SUMMARY.txt').write_text(
               f"{totals['tests']} executed / {totals['failures']} failures / "
               f"{totals['errors']} errors / {totals['skipped']} skipped\n"
-              "runtime_certification=NOT_EXECUTED\n",
+              "runtime_certification=CI_PAPER_STARTUP_SMOKE_PASS\n"
+              "live_plexoncraft=PENDING\n",
               encoding='utf-8')
           PY
           jar="target/PlexonTravel-${VERSION}.jar"
@@ -87,16 +90,18 @@ jobs:
           paper=26.2.build.121-stable
           plexoncore=2.0.5
           plexoncore_sha256=${CORE_SHA256}
-          rollback_tag=v3.0.0
-          rollback_sha=1bf92f4ef93ba150e61df524c78799703b5d4ce4
+          rollback_tag=v3.0.1
+          rollback_sha=7fc8fcb64d3153375d9a087d19ce44bc4f4de945
           standard_command_takeover=ENABLED_BY_DEFAULT
           migration_execution=OPERATOR_GATED
           jar_size=${size}
           jar_sha256=${digest}
-          runtime_certification=NOT_EXECUTED
+          runtime_certification=CI_PAPER_STARTUP_SMOKE_PASS
+          live_plexoncraft=PENDING
           EOF
           cat TEST_SUMMARY.txt
           cat PROVENANCE.txt
+          cat PAPER_STARTUP_SMOKE.txt
       - name: Check whitespace
         run: git diff --check origin/main...HEAD
       - name: Upload verified artifact
@@ -108,5 +113,6 @@ jobs:
             SHA256SUMS.txt
             TEST_SUMMARY.txt
             PROVENANCE.txt
+            PAPER_STARTUP_SMOKE.txt
           if-no-files-found: error
           retention-days: 30

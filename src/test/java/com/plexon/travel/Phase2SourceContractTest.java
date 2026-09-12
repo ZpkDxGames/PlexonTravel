@@ -91,6 +91,9 @@ class Phase2SourceContractTest {
         assertTrue(source.contains("catch (Exception | LinkageError failure)"));
         assertTrue(source.contains("Unexpected startup failure during"));
         assertTrue(source.contains("if (!startupFailed)"));
+        assertTrue(source.contains("STARTUP_PHASE="));
+        assertTrue(source.contains("STARTUP_READY version="));
+        assertTrue(source.contains("startup-failure.txt"));
     }
 
     @Test
@@ -102,9 +105,9 @@ class Phase2SourceContractTest {
     }
 
     @Test
-    void releaseLineIs301OnCore205() throws Exception {
+    void releaseLineIs302OnCore205() throws Exception {
         String pom = Files.readString(Path.of("pom.xml"));
-        assertTrue(pom.contains("<version>3.0.1</version>"));
+        assertTrue(pom.contains("<version>3.0.2</version>"));
         assertTrue(pom.contains("<core.version>2.0.5</core.version>"));
     }
 }

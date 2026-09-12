@@ -36,6 +36,8 @@ import org.bukkit.plugin.ServicePriority;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.io.File;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
@@ -60,12 +62,13 @@ public final class PlexonTravel extends JavaPlugin implements Listener {
     private TravelCommands commands;
     private PublicApi publicApi;
     private boolean startupFailed;
+    private String startupPhase = "bootstrap";
 
     @Override
     public void onEnable() {
-        String phase = "bootstrap";
+        startupFailed = false;
         try {
-            phase = "resource/config initialization";
+            markStartupPhase("config");
             saveDefaultConfig();
             saveResourceIfAbsent("messages.yml");
             saveResourceIfAbsent("gui.yml");
@@ -77,7 +80,7 @@ public final class PlexonTravel extends JavaPlugin implements Listener {
                 return;
             }
 
-            phase = "PlexonCore service discovery";
+            markStartupPhase("core");
             RegisteredServiceProvider<PlexonCoreAPI> registration = getServer().getServicesManager().getRegistration(PlexonCoreAPI.class);
             if (registration == null || registration.getProvider() == null) {
                 failStartup("PlexonCore API service is unavailable; PlexonTravel cannot start.", null);
@@ -89,7 +92,6 @@ public final class PlexonTravel extends JavaPlugin implements Listener {
                 return;
             }
 
-            phase = "PlexonCore module registration";
             ModuleRegistry.RegistrationResult moduleRegistration = core.modules().register(new ModuleDescriptor(
                 MODULE_ID,
                 "PlexonTravel",
@@ -108,13 +110,13 @@ public final class PlexonTravel extends JavaPlugin implements Listener {
                 return;
             }
 
-            phase = "SQLite persistence";
+            markStartupPhase("storage");
             storage = new TravelStorage(this, getDataFolder().toPath().resolve("travel.db"));
             storage.open();
             destinations = new DestinationRegistry(this, storage);
             destinations.load();
 
-            phase = "runtime services";
+            markStartupPhase("runtime");
             messages = new TravelMessages(this);
             engine = new TravelEngine(this, destinations, messages);
             rtp = new RtpService(this, engine, messages);
@@ -123,7 +125,7 @@ public final class PlexonTravel extends JavaPlugin implements Listener {
             commands = new TravelCommands(this, destinations, engine, messages, menus, tpa, rtp, storage);
             publicApi = new PublicApi();
 
-            phase = "Bukkit registration";
+            markStartupPhase("bukkit-registration");
             getServer().getServicesManager().register(PlexonTravelAPI.class, publicApi, this, ServicePriority.Normal);
             if (getServer().getPluginManager().isPluginEnabled("PlaceholderAPI")) {
                 try {
@@ -143,10 +145,18 @@ public final class PlexonTravel extends JavaPlugin implements Listener {
                 "Core " + core.version().pluginVersion() + " / API " + core.version().apiVersion()
                     + "; per-world destinations=" + (destinations.worldSpawnCount() + destinations.worldHubCount())
                     + "; warps=" + destinations.warpCount());
+            clearStartupFailureReport();
+            getLogger().info("STARTUP_READY version=" + getPluginMeta().getVersion()
+                + " core=" + core.version().pluginVersion() + " warps=" + destinations.warpCount());
             getLogger().info("PlexonTravel " + getPluginMeta().getVersion() + " enabled against PlexonCore " + core.version().pluginVersion());
         } catch (Exception | LinkageError failure) {
-            failStartup("Unexpected startup failure during " + phase + ": " + failure.getMessage(), failure);
+            failStartup("Unexpected startup failure during " + startupPhase + ": " + failure.getMessage(), failure);
         }
+    }
+
+    private void markStartupPhase(String phase) {
+        startupPhase = phase;
+        getLogger().info("STARTUP_PHASE=" + phase);
     }
 
     private void failStartup(String detail, Throwable failure) {
@@ -156,7 +166,53 @@ public final class PlexonTravel extends JavaPlugin implements Listener {
         }
         if (failure == null) getLogger().severe(detail);
         else getLogger().log(Level.SEVERE, detail, failure);
+        writeStartupFailureReport(detail, failure);
         getServer().getPluginManager().disablePlugin(this);
+    }
+
+    private void writeStartupFailureReport(String detail, Throwable failure) {
+        try {
+            Path report = startupFailureReport();
+            Files.createDirectories(report.getParent());
+            Throwable root = rootCause(failure);
+            String exceptionType = root == null ? "ConfigurationValidationFailure" : root.getClass().getName();
+            String rootMessage = root == null ? detail : root.getMessage();
+            Files.writeString(report, String.join("\n",
+                "plugin_version=" + cleanLine(getPluginMeta().getVersion()),
+                "paper_version=" + cleanLine(getServer().getVersion()),
+                "java_version=" + cleanLine(System.getProperty("java.version", "unknown")),
+                "startup_phase=" + cleanLine(startupPhase),
+                "exception_type=" + cleanLine(exceptionType),
+                "root_cause_message=" + cleanLine(rootMessage == null ? detail : rootMessage),
+                "timestamp=" + Instant.now(),
+                ""));
+        } catch (Exception reportFailure) {
+            getLogger().log(Level.WARNING, "Could not write startup-failure.txt", reportFailure);
+        }
+    }
+
+    private void clearStartupFailureReport() {
+        try {
+            Files.deleteIfExists(startupFailureReport());
+        } catch (Exception failure) {
+            getLogger().log(Level.WARNING, "Could not clear stale startup-failure.txt", failure);
+        }
+    }
+
+    private Path startupFailureReport() {
+        return getDataFolder().toPath().resolve("startup-failure.txt");
+    }
+
+    private Throwable rootCause(Throwable failure) {
+        Throwable cursor = failure;
+        while (cursor != null && cursor.getCause() != null && cursor.getCause() != cursor) cursor = cursor.getCause();
+        return cursor;
+    }
+
+    private String cleanLine(String value) {
+        if (value == null) return "";
+        String clean = value.replace('\n', ' ').replace('\r', ' ').replace('\t', ' ').trim();
+        return clean.length() <= 512 ? clean : clean.substring(0, 512);
     }
 
     @Override

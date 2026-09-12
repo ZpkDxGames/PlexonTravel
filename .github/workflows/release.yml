@@ -8,15 +8,15 @@ permissions:
   contents: write
 
 env:
-  ACCEPTED_CANDIDATE_SHA: 'c15fa94a6fcfcdbcf1ef52aa92dbb8faa101724a'
+  ACCEPTED_CANDIDATE_SHA: 'a88d1656a75202e71c15d037258771e25e2c123c'
   CORE_SHA256: 'bf4df796e83571e76c06b296c75c5e73ddc8053cb2c587d74c08cd3922e0b4d4'
-  ROLLBACK_TAG: v3.0.0
-  ROLLBACK_SHA: 1bf92f4ef93ba150e61df524c78799703b5d4ce4
+  ROLLBACK_TAG: v3.0.1
+  ROLLBACK_SHA: 7fc8fcb64d3153375d9a087d19ce44bc4f4de945
 
 jobs:
   release:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - name: Checkout exact stable candidate
         uses: actions/checkout@v7
@@ -65,6 +65,8 @@ jobs:
         run: mvn -B -ntp clean verify
       - name: Verify exact distribution
         run: ./scripts/verify-distribution.sh "target/PlexonTravel-${VERSION}.jar"
+      - name: Real Paper startup smoke
+        run: ./scripts/paper-startup-smoke.sh "${VERSION}" "target/PlexonTravel-${VERSION}.jar"
       - name: Build exact release evidence
         shell: bash
         run: |
@@ -81,7 +83,8 @@ jobs:
           pathlib.Path('TEST_SUMMARY.txt').write_text(
               f"{totals['tests']} executed / {totals['failures']} failures / "
               f"{totals['errors']} errors / {totals['skipped']} skipped\n"
-              "runtime_certification=NOT_EXECUTED\n",
+              "runtime_certification=CI_PAPER_STARTUP_SMOKE_PASS\n"
+              "live_plexoncraft=PENDING\n",
               encoding='utf-8')
           PY
           jar="target/PlexonTravel-${VERSION}.jar"
@@ -106,8 +109,12 @@ jobs:
           migration_execution=OPERATOR_GATED
           jar_size=${size}
           jar_sha256=${digest}
-          runtime_certification=NOT_EXECUTED
+          runtime_certification=CI_PAPER_STARTUP_SMOKE_PASS
+          live_plexoncraft=PENDING
           EOF
+          cat TEST_SUMMARY.txt
+          cat PROVENANCE.txt
+          cat PAPER_STARTUP_SMOKE.txt
       - name: Publish GitHub stable release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -116,7 +123,7 @@ jobs:
           set -euo pipefail
           gh release create "v${VERSION}" \
             "target/PlexonTravel-${VERSION}.jar" \
-            SHA256SUMS.txt TEST_SUMMARY.txt PROVENANCE.txt \
+            SHA256SUMS.txt TEST_SUMMARY.txt PROVENANCE.txt PAPER_STARTUP_SMOKE.txt \
             --target "$GITHUB_SHA" \
             --title "PlexonTravel ${VERSION}" \
             --notes-file "releases/${VERSION}.md" \
@@ -131,16 +138,19 @@ jobs:
           test "$(gh release view "v${VERSION}" --json tagName --jq '.tagName')" = "v${VERSION}"
           test "$(git ls-remote origin "refs/tags/v${VERSION}" | cut -f1)" = "$GITHUB_SHA"
           assets="$(gh release view "v${VERSION}" --json assets --jq '.assets[].name')"
-          for asset in "PlexonTravel-${VERSION}.jar" SHA256SUMS.txt TEST_SUMMARY.txt PROVENANCE.txt; do
+          for asset in "PlexonTravel-${VERSION}.jar" SHA256SUMS.txt TEST_SUMMARY.txt PROVENANCE.txt PAPER_STARTUP_SMOKE.txt; do
             grep -qx "$asset" <<<"$assets"
           done
           mkdir published
           gh release download "v${VERSION}" --dir published
           (cd published && sha256sum --check SHA256SUMS.txt)
           grep -F "source_sha=${GITHUB_SHA}" published/PROVENANCE.txt
+          grep -F "accepted_candidate=${ACCEPTED_CANDIDATE_SHA}" published/PROVENANCE.txt
           grep -F 'standard_command_takeover=ENABLED_BY_DEFAULT' published/PROVENANCE.txt
           grep -F 'migration_execution=OPERATOR_GATED' published/PROVENANCE.txt
-          grep -F 'runtime_certification=NOT_EXECUTED' published/PROVENANCE.txt
+          grep -F 'runtime_certification=CI_PAPER_STARTUP_SMOKE_PASS' published/PROVENANCE.txt
+          grep -F 'live_plexoncraft=PENDING' published/PROVENANCE.txt
+          grep -F 'result=PASS' published/PAPER_STARTUP_SMOKE.txt
       - name: Upload release verification evidence
         if: always()
         uses: actions/upload-artifact@v7
@@ -151,5 +161,6 @@ jobs:
             SHA256SUMS.txt
             TEST_SUMMARY.txt
             PROVENANCE.txt
+            PAPER_STARTUP_SMOKE.txt
           if-no-files-found: warn
           retention-days: 30

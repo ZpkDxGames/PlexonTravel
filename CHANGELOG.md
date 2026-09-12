@@ -1,5 +1,15 @@
 # Changelog
 
+## 3.0.2 — Production Startup Hotfix
+- Fixes the proven 3.0.x upgrade startup failure where new enum settings inherited from embedded defaults were seen by `contains(path)` but then read with an explicit empty fallback, causing valid 2.x configuration files to fail validation.
+- Adds the exact 2.0.0 configuration shape as a regression fixture and verifies the 3.x spawn fallback, hub fallback and RTP center mode resolve from embedded defaults during upgrade.
+- Adds a real Java 25 + Paper `26.2.build.121-stable` + PlexonCore 2.0.5 startup smoke test to branch and stable-release CI.
+- Requires a machine-readable `STARTUP_READY` marker before Paper startup smoke can pass.
+- Adds concise startup phase markers and a durable `startup-failure.txt` containing non-secret version/phase/root-cause evidence; successful startup removes stale failure evidence.
+- Adds `PAPER_STARTUP_SMOKE.txt` to stable release evidence and keeps live PlexonCraft certification distinct from CI Paper runtime proof.
+- Leaves SQLite data, travel behavior, commands, TPA/RTP semantics and player UX unchanged.
+- Moves the stable rollback baseline to `v3.0.1`.
+
 ## 3.0.1 — Runtime Hardening
 - Hardens startup as a single phase-aware transaction so unexpected runtime/linkage failures identify the exact failed phase and remain `FAILED` in PlexonCore diagnostics instead of being overwritten as an ordinary disable.
 - Keeps startup alive when an individual SQLite destination, warp or back row is malformed; invalid rows are isolated and logged while valid persisted data continues loading.
