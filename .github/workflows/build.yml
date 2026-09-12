@@ -90,9 +90,10 @@ jobs:
           paper=26.2.build.121-stable
           plexoncore=2.0.5
           plexoncore_sha256=${CORE_SHA256}
-          rollback_tag=v3.0.2
-          rollback_sha=66c8e1baff74bc307162d0164c5e3e432297d651
-          standard_command_takeover=ENABLED_BY_DEFAULT
+          rollback_tag=v3.1.0
+          rollback_sha=02e61ad9a48ef80b8bf2a6c6e886b4dd7b94c80b
+          standard_command_takeover=ENABLED_EXCEPT_WARPS
+          warps_command_owner=EXTERNAL_PANEL
           migration_execution=OPERATOR_GATED
           jar_size=${size}
           jar_sha256=${digest}
