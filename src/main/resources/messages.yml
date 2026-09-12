@@ -1,3 +1,64 @@
-# Reserved for message customization in a follow-up release.
-# PlexonTravel 1.0.0 keeps runtime strings compact and centralized in the plugin.
-prefix: '<aqua>PlexonTravel</aqua>'
+prefix: '<gradient:#22d3ee:#38bdf8><bold>PlexonTravel</bold></gradient><dark_gray> »</dark_gray>'
+
+commands:
+  no-permission: '<red>You do not have permission.</red>'
+  player-only: '<red>This command requires a player.</red>'
+  takeover-disabled: '<yellow>Standard travel command takeover is disabled. Use <white>/ptravel</white> while staging.</yellow>'
+
+destination:
+  missing: '<red>That destination is not configured.</red>'
+  unsafe: '<red>No safe destination is available.</red>'
+
+back:
+  missing: '<yellow>No back location is available.</yellow>'
+
+warp:
+  missing: '<red>Warp not found.</red>'
+
+bossbar:
+  teleport: '<gradient:#22d3ee:#38bdf8><bold>Teleporting</bold></gradient> <gray>in <white>{seconds}s</white></gray>'
+
+teleport:
+  already-pending: '<red>A teleport is already pending or in progress.</red>'
+  warmup: '<gray>Teleporting in <aqua>{seconds}s</aqua>. Move or take damage to cancel.</gray>'
+  cooldown: '<yellow>Wait <white>{seconds}s</white> before travelling again.</yellow>'
+  cancelled-moved: '<red>Teleport cancelled because you moved.</red>'
+  cancelled-damage: '<red>Teleport cancelled because you took damage.</red>'
+  fee-failed: '<red>Unable to charge the teleport fee.</red>'
+  complete: '<green>Teleport complete.</green>'
+  failed: '<red>Teleport failed; any fee was refunded.</red>'
+
+tpa:
+  disabled: '<red>Teleport requests are disabled.</red>'
+  self: '<red>You cannot send a teleport request to yourself.</red>'
+  cross-world: '<red>Cross-world teleport requests are disabled.</red>'
+  player-not-found: '<red>That player is not online.</red>'
+  already-pending: '<yellow>You already have an active teleport request.</yellow>'
+  sent: '<gray>Teleport request sent to <aqua>{target}</aqua>.</gray>'
+  received: '<aqua>{player}</aqua> <gray>wants to teleport to you. <green>/tpaccept</green> <dark_gray>or</dark_gray> <red>/tpdeny</red>.</gray>'
+  sent-here: '<gray>Requested <aqua>{target}</aqua> to teleport to you.</gray>'
+  received-here: '<aqua>{player}</aqua> <gray>wants you to teleport to them. <green>/tpaccept</green> <dark_gray>or</dark_gray> <red>/tpdeny</red>.</gray>'
+  requester-offline: '<red>That player is no longer online.</red>'
+  accepted: '<green>Teleport request accepted.</green>'
+  accepted-requester: '<green>{player}</green> <gray>accepted your teleport request.</gray>'
+  denied: '<gray>Teleport request denied.</gray>'
+  denied-requester: '<red>{player}</red> <gray>denied your teleport request.</gray>'
+  none-outgoing: '<yellow>You do not have an outgoing teleport request.</yellow>'
+  cancelled: '<gray>Teleport request cancelled.</gray>'
+  cancelled-target: '<gray>{player} cancelled their teleport request.</gray>'
+  not-found: '<red>No matching teleport request was found.</red>'
+  none-incoming: '<yellow>You have no pending teleport requests.</yellow>'
+  multiple: '<yellow>You have multiple requests. Specify the player with /tpaccept [player] or /tpdeny [player].</yellow>'
+  expired: '<yellow>Your teleport request expired.</yellow>'
+
+rtp:
+  disabled: '<red>Random teleport is disabled.</red>'
+  world-not-allowed: '<red>RTP is not available in this world.</red>'
+  already-searching: '<yellow>A safe RTP destination is already being searched.</yellow>'
+  searching: '<gray>Searching for a safe location between the configured minimum and maximum radius...</gray>'
+  failed: '<red>No safe RTP location was found. Try again.</red>'
+
+gui:
+  help-title: '<gradient:#22d3ee:#38bdf8><bold>Plexon Travel</bold></gradient>'
+  warps-title: '<gradient:#22d3ee:#38bdf8><bold>Plexon Warps</bold></gradient>'
+  rtp-title: '<gradient:#c084fc:#22d3ee><bold>Random Teleport</bold></gradient>'

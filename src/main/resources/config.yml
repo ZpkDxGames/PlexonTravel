@@ -1,31 +1,65 @@
+commands:
+  # 3.0 is intended to own the legacy Essentials/WorldSpawn travel surface.
+  # Set false only while staging alongside another command provider.
+  takeover-enabled: true
+
 teleport:
   movement-threshold: 0.01
   spawn:
-    warmup-seconds: 3
+    warmup-seconds: 5
     cooldown-seconds: 10
     fee: 0.0
   hub:
-    warmup-seconds: 3
+    warmup-seconds: 5
     cooldown-seconds: 10
     fee: 0.0
   warp:
-    warmup-seconds: 3
+    warmup-seconds: 5
     cooldown-seconds: 10
     default-fee: 0.0
   back:
     warmup-seconds: 5
     cooldown-seconds: 15
     fee: 0.0
+  tpa:
+    warmup-seconds: 5
+    cooldown-seconds: 10
+    fee: 0.0
+  rtp:
+    warmup-seconds: 5
+    cooldown-seconds: 120
+    fee: 0.0
   admin:
     warmup-seconds: 0
     cooldown-seconds: 0
     fee: 0.0
+
+effects:
+  warmup:
+    particles: true
+    particle-count: 8
+  complete:
+    particles: true
+    particle-count: 28
+    sound: true
 
 safe-teleport:
   enabled: true
   search-nearby: true
   horizontal-radius: 3
   vertical-radius: 4
+
+destinations:
+  spawn:
+    # Existing 2.x global spawn remains a compatibility fallback after upgrade.
+    legacy-global-fallback: true
+    fallback: VANILLA
+  hub:
+    fallback: GLOBAL
+
+# PER_WORLD resolves a world-specific hub first and then destinations.hub.fallback.
+hub:
+  mode: PER_WORLD
 
 back:
   persist-across-restart: true
@@ -37,8 +71,26 @@ back:
 cooldowns:
   mode: PER_TYPE
 
-hub:
-  mode: SEPARATE
+tpa:
+  enabled: true
+  request-timeout-seconds: 30
+  allow-cross-world: true
+
+rtp:
+  enabled: true
+  allowed-worlds:
+    - Survival_World
+  center:
+    # WORLD_SPAWN uses the vanilla world spawn as the annulus center.
+    # CONFIGURED uses x/z below instead.
+    mode: WORLD_SPAWN
+    x: 0.0
+    z: 0.0
+  min-radius: 2000.0
+  max-radius: 10000.0
+  max-attempts: 24
+  # false avoids creating new terrain during RTP. Recommended for Chunky-pregenerated worlds.
+  generate-chunks: false
 
 join:
   teleport-to-spawn: false
@@ -47,12 +99,11 @@ respawn:
   mode: VANILLA
 
 migration:
-  # Keep false until /traveladmin migrate scan and staging verification are complete.
-  claim-standard-commands: false
-  # Execute is intentionally gated separately from scan/plan/status.
+  # Retained as a compatibility marker for older 2.x installs. 3.0 command ownership is controlled above.
+  claim-standard-commands: true
+  # Essentials warp import remains a deliberate operator action.
   allow-execute: false
 
-# Phase 2 reload is transactional: malformed candidate values are rejected and the prior runtime config remains active.
 # Supported cooldowns.mode: PER_TYPE, GLOBAL
-# Supported hub.mode: SEPARATE, SPAWN, DISABLED
+# Supported hub.mode: PER_WORLD, GLOBAL, SPAWN, DISABLED (SEPARATE remains accepted for 2.x compatibility)
 # Supported respawn.mode: VANILLA, SPAWN, HUB, LAST_BED_OR_SPAWN

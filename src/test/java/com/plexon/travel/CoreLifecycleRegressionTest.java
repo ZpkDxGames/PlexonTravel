@@ -22,21 +22,21 @@ class CoreLifecycleRegressionTest {
     private static final ModuleVersionRange SUPPORTED = ModuleVersionRange.parse(">=2.0 <3.0");
 
     @Test
-    void acceptsCore204AndRejectsCore3() {
-        assertTrue(SUPPORTED.contains(CoreVersion.of(2, 0, "2.0.4")));
+    void acceptsCore205AndRejectsCore3() {
+        assertTrue(SUPPORTED.contains(CoreVersion.of(2, 0, "2.0.5")));
         assertFalse(SUPPORTED.contains(CoreVersion.of(3, 0, "3.0.0")));
     }
 
     @Test
     void sourceFailsClosedWhenCoreServiceIsMissing() throws Exception {
         String source = Files.readString(Path.of("src/main/java/com/plexon/travel/PlexonTravel.java"));
-        assertTrue(source.contains("coreRegistration == null || coreRegistration.getProvider() == null"));
+        assertTrue(source.contains("registration == null || registration.getProvider() == null"));
         assertTrue(source.contains("disablePlugin(this)"));
     }
 
     @Test
     void startingTransitionsToReadyOnlyForExactOwner() {
-        ModuleRegistry registry = new ModuleRegistry(CoreVersion.of(2, 0, "2.0.4"));
+        ModuleRegistry registry = new ModuleRegistry(CoreVersion.of(2, 0, "2.0.5"));
         Plugin owner = plugin("PlexonTravel", true);
         assertTrue(registry.register(descriptor(owner, ModuleState.STARTING)).success());
         assertEquals(ModuleState.STARTING, registry.find("travel").orElseThrow().state());
@@ -46,7 +46,7 @@ class CoreLifecycleRegressionTest {
 
     @Test
     void duplicateLiveOwnerCannotOverwriteMutateOrRemoveModule() {
-        ModuleRegistry registry = new ModuleRegistry(CoreVersion.of(2, 0, "2.0.4"));
+        ModuleRegistry registry = new ModuleRegistry(CoreVersion.of(2, 0, "2.0.5"));
         Plugin first = plugin("PlexonTravel", true);
         Plugin second = plugin("PlexonTravel", true);
         assertTrue(registry.register(descriptor(first, ModuleState.STARTING)).success());
@@ -60,8 +60,8 @@ class CoreLifecycleRegressionTest {
 
     private static ModuleDescriptor descriptor(Plugin plugin, ModuleState state) {
         return new ModuleDescriptor(
-            "travel", "PlexonTravel", plugin.getName(), "2.0.0-rc.1", plugin, SUPPORTED,
-            Set.of("safe-teleport"), state, "test", Instant.now());
+            "travel", "PlexonTravel", plugin.getName(), "3.0.0", plugin, SUPPORTED,
+            Set.of("safe-teleport", "per-world-destinations", "tpa", "rtp"), state, "test", Instant.now());
     }
 
     private static Plugin plugin(String name, boolean enabled) {
