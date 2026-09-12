@@ -9,6 +9,13 @@ import java.util.concurrent.CompletableFuture;
 public interface PlexonTravelAPI {
     Optional<TravelDestinationView> spawn();
     Optional<TravelDestinationView> hub();
+
+    /** World-aware destination lookup added in PlexonTravel 3.0. */
+    default Optional<TravelDestinationView> spawn(UUID worldId) { return spawn(); }
+
+    /** World-aware destination lookup added in PlexonTravel 3.0. */
+    default Optional<TravelDestinationView> hub(UUID worldId) { return hub(); }
+
     Optional<WarpView> warp(String id);
     List<WarpView> warps();
     Optional<BackLocationView> back(UUID playerId);
@@ -17,7 +24,7 @@ public interface PlexonTravelAPI {
     boolean cancelPending(UUID playerId);
     CompletableFuture<Boolean> teleport(UUID playerId, TravelDestinationView destination, TravelType type);
 
-    enum TravelType { SPAWN, HUB, WARP, BACK, TPA, ADMIN }
+    enum TravelType { SPAWN, HUB, WARP, BACK, TPA, RTP, ADMIN }
 
     enum CancelReason {
         MOVED, DAMAGED, DIED, QUIT, WORLD_CHANGED, DESTINATION_UNSAFE, DESTINATION_MISSING,
