@@ -8,10 +8,10 @@ permissions:
   contents: write
 
 env:
-  ACCEPTED_RC_SHA: 'b811091418ba630caeaddfa54f6bf67cdcb5294a'
-  CORE_SHA256: '61d625a717da9f46ee9231e1970d84b4c317ae12cf4090cdf7c9d39b6a1a9baf'
-  ROLLBACK_TAG: v1.0.1
-  ROLLBACK_SHA: 772188d55c694deea0bc5ae0bdce0898513499e5
+  ACCEPTED_CANDIDATE_SHA: '0e16f38d0ed52b7dfe4ebbc4ae13f58d4395a70a'
+  CORE_SHA256: 'bf4df796e83571e76c06b296c75c5e73ddc8053cb2c587d74c08cd3922e0b4d4'
+  ROLLBACK_TAG: v2.0.0
+  ROLLBACK_SHA: 2d29d559e08a98f1e3577fbd3a574e34154c4b71
 
 jobs:
   release:
@@ -28,15 +28,15 @@ jobs:
           distribution: temurin
           java-version: '25'
           cache: maven
-      - name: Provision exact PlexonCore 2.0.4
+      - name: Provision exact PlexonCore 2.0.5
         shell: bash
         run: |
           set -euo pipefail
-          curl -L --fail --retry 3 -o /tmp/PlexonCore-2.0.4.jar https://github.com/ZpkDxGames/PlexonCore/releases/download/v2.0.4/PlexonCore-2.0.4.jar
-          echo "${CORE_SHA256}  /tmp/PlexonCore-2.0.4.jar" | sha256sum -c -
+          curl -L --fail --retry 3 -o /tmp/PlexonCore-2.0.5.jar https://github.com/ZpkDxGames/PlexonCore/releases/download/v2.0.5/PlexonCore-2.0.5.jar
+          echo "${CORE_SHA256}  /tmp/PlexonCore-2.0.5.jar" | sha256sum -c -
           mvn -B -ntp org.apache.maven.plugins:maven-install-plugin:3.1.4:install-file \
-            -Dfile=/tmp/PlexonCore-2.0.4.jar -DgroupId=com.zpkdxgames \
-            -DartifactId=PlexonCore -Dversion=2.0.4 -Dpackaging=jar -DgeneratePom=true
+            -Dfile=/tmp/PlexonCore-2.0.5.jar -DgroupId=com.zpkdxgames \
+            -DartifactId=PlexonCore -Dversion=2.0.5 -Dpackaging=jar -DgeneratePom=true
       - name: Read project version
         shell: bash
         run: |
@@ -54,7 +54,7 @@ jobs:
           main_sha="$(git ls-remote origin refs/heads/main | cut -f1)"
           test -n "$main_sha"
           test "$GITHUB_SHA" = "$main_sha"
-          git merge-base --is-ancestor "$ACCEPTED_RC_SHA" HEAD
+          git merge-base --is-ancestor "$ACCEPTED_CANDIDATE_SHA" HEAD
           test -f "releases/${VERSION}.md"
           test -z "$(git ls-remote --tags origin "refs/tags/v${VERSION}")"
           if gh release view "v${VERSION}" >/dev/null 2>&1; then
@@ -70,7 +70,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import glob, os, pathlib, xml.etree.ElementTree as ET
+          import glob, pathlib, xml.etree.ElementTree as ET
           totals = dict(tests=0, failures=0, errors=0, skipped=0)
           for path in glob.glob('target/surefire-reports/TEST-*.xml'):
               root = ET.parse(path).getroot()
@@ -94,15 +94,15 @@ jobs:
           source_sha=${GITHUB_SHA}
           tag=v${VERSION}
           version=${VERSION}
-          accepted_rc=${ACCEPTED_RC_SHA}
+          accepted_candidate=${ACCEPTED_CANDIDATE_SHA}
           java=25
           class_major=69
           paper=26.2.build.121-stable
-          plexoncore=2.0.4
+          plexoncore=2.0.5
           plexoncore_sha256=${CORE_SHA256}
           rollback_tag=${ROLLBACK_TAG}
           rollback_sha=${ROLLBACK_SHA}
-          standard_command_takeover=OPERATOR_GATED
+          standard_command_takeover=ENABLED_BY_DEFAULT
           migration_execution=OPERATOR_GATED
           jar_size=${size}
           jar_sha256=${digest}
@@ -138,7 +138,7 @@ jobs:
           gh release download "v${VERSION}" --dir published
           (cd published && sha256sum --check SHA256SUMS.txt)
           grep -F "source_sha=${GITHUB_SHA}" published/PROVENANCE.txt
-          grep -F 'standard_command_takeover=OPERATOR_GATED' published/PROVENANCE.txt
+          grep -F 'standard_command_takeover=ENABLED_BY_DEFAULT' published/PROVENANCE.txt
           grep -F 'migration_execution=OPERATOR_GATED' published/PROVENANCE.txt
           grep -F 'runtime_certification=NOT_EXECUTED' published/PROVENANCE.txt
       - name: Upload release verification evidence
