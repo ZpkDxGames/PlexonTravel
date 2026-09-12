@@ -16,6 +16,7 @@ import java.util.concurrent.atomic.AtomicReference;
 final class DestinationRegistry {
     private static final String WORLD_SPAWN_PREFIX = "spawn:";
     private static final String WORLD_HUB_PREFIX = "hub:";
+    private static final int MAX_WARP_DISPLAY = 80;
 
     private final PlexonTravel plugin;
     private final TravelStorage storage;
@@ -38,6 +39,7 @@ final class DestinationRegistry {
             else if (id.equals("hub")) legacyHub.set(entry.getValue());
             else if (id.startsWith(WORLD_SPAWN_PREFIX)) parseWorldDestination(id, WORLD_SPAWN_PREFIX, entry.getValue(), worldSpawns);
             else if (id.startsWith(WORLD_HUB_PREFIX)) parseWorldDestination(id, WORLD_HUB_PREFIX, entry.getValue(), worldHubs);
+            else plugin.getLogger().warning("Ignoring unknown destination key: " + id);
         }
         warps.putAll(storage.loadWarps());
         back.putAll(storage.loadBack());
@@ -89,24 +91,28 @@ final class DestinationRegistry {
 
     void setWorldSpawn(World world, Location location) {
         Destination destination = Destination.from(location);
+        if (world == null || destination == null) return;
         worldSpawns.put(world.getUID(), destination);
         storage.saveDestinationAsync(WORLD_SPAWN_PREFIX + world.getUID(), destination);
     }
 
     void setWorldHub(World world, Location location) {
         Destination destination = Destination.from(location);
+        if (world == null || destination == null) return;
         worldHubs.put(world.getUID(), destination);
         storage.saveDestinationAsync(WORLD_HUB_PREFIX + world.getUID(), destination);
     }
 
     void setGlobalSpawn(Location location) {
         Destination destination = Destination.from(location);
+        if (destination == null) return;
         legacySpawn.set(destination);
         storage.saveDestinationAsync("spawn", destination);
     }
 
     void setGlobalHub(Location location) {
         Destination destination = Destination.from(location);
+        if (destination == null) return;
         legacyHub.set(destination);
         storage.saveDestinationAsync("hub", destination);
     }
@@ -115,7 +121,7 @@ final class DestinationRegistry {
 
     void setBack(UUID playerId, Location location, String source) {
         if (location == null || location.getWorld() == null || !Destination.finite(location)) return;
-        BackEntry entry = new BackEntry(Destination.from(location), source, System.currentTimeMillis());
+        BackEntry entry = new BackEntry(Destination.from(location), source == null ? "unknown" : source, System.currentTimeMillis());
         back.put(playerId, entry);
         storage.saveBackAsync(playerId, entry);
     }
@@ -133,10 +139,12 @@ final class DestinationRegistry {
 
     Warp saveWarp(String requestedName, Location location) {
         String id = normalizeId(requestedName);
-        if (id.isBlank()) return null;
+        Destination destination = Destination.from(location);
+        String displayName = boundedDisplay(requestedName);
+        if (id.isBlank() || destination == null || displayName == null) return null;
         Warp previous = warps.get(id);
         long revision = previous == null ? 1L : previous.revision() + 1L;
-        Warp current = new Warp(id, requestedName, Destination.from(location), true,
+        Warp current = new Warp(id, displayName, destination, true,
             "plexontravel.warp." + id, false, previous == null ? warps.size() : previous.sortOrder(),
             previous == null ? "ENDER_PEARL" : previous.icon(), previous == null ? "Server" : previous.category(), revision);
         warps.put(id, current);
@@ -146,9 +154,12 @@ final class DestinationRegistry {
 
     Warp importWarp(String requestedName, Destination destination, String category) {
         String id = normalizeId(requestedName);
-        if (id.isBlank() || destination == null || !destination.finite() || warps.containsKey(id)) return null;
-        Warp warp = new Warp(id, requestedName, destination, true, "plexontravel.warp." + id, false,
-            warps.size(), "ENDER_PEARL", category == null || category.isBlank() ? "Imported" : category, 1L);
+        String displayName = boundedDisplay(requestedName);
+        if (id.isBlank() || displayName == null || destination == null || !destination.finite() || warps.containsKey(id)) return null;
+        String resolvedCategory = category == null || category.isBlank() ? "Imported" : category.trim();
+        if (resolvedCategory.length() > MAX_WARP_DISPLAY) resolvedCategory = resolvedCategory.substring(0, MAX_WARP_DISPLAY);
+        Warp warp = new Warp(id, displayName, destination, true, "plexontravel.warp." + id, false,
+            warps.size(), "ENDER_PEARL", resolvedCategory, 1L);
         warps.put(id, warp);
         storage.saveWarpAsync(warp);
         return warp;
@@ -157,12 +168,20 @@ final class DestinationRegistry {
     Warp renameWarp(String id, String displayName) {
         String normalized = normalizeId(id);
         Warp old = warps.get(normalized);
-        if (old == null || displayName == null || displayName.isBlank() || displayName.length() > 80) return null;
-        Warp renamed = new Warp(old.id(), displayName.trim(), old.destination(), old.enabled(), old.permission(),
+        String bounded = boundedDisplay(displayName);
+        if (old == null || bounded == null) return null;
+        Warp renamed = new Warp(old.id(), bounded, old.destination(), old.enabled(), old.permission(),
             old.permissionRequired(), old.sortOrder(), old.icon(), old.category(), old.revision() + 1L);
         warps.put(normalized, renamed);
         storage.saveWarpAsync(renamed);
         return renamed;
+    }
+
+    private String boundedDisplay(String displayName) {
+        if (displayName == null) return null;
+        String trimmed = displayName.trim();
+        if (trimmed.isBlank() || trimmed.length() > MAX_WARP_DISPLAY) return null;
+        return trimmed;
     }
 
     boolean removeWarp(Warp expected) {
