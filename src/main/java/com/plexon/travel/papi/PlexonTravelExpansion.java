@@ -3,6 +3,7 @@ package com.plexon.travel.papi;
 import com.plexon.travel.api.PlexonTravelAPI;
 import me.clip.placeholderapi.expansion.PlaceholderExpansion;
 import org.bukkit.OfflinePlayer;
+import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -23,10 +24,13 @@ public final class PlexonTravelExpansion extends PlaceholderExpansion {
     @Override
     public @Nullable String onRequest(OfflinePlayer player, @NotNull String params) {
         String key = params.toLowerCase(Locale.ROOT);
+        Player online = player == null ? null : player.getPlayer();
         return switch (key) {
-            case "spawn_configured" -> Boolean.toString(api.spawn().isPresent());
-            case "hub_configured" -> Boolean.toString(api.hub().isPresent());
-            case "warps" -> Integer.toString(api.warps().size());
+            case "spawn_configured" -> Boolean.toString(online == null
+                ? api.spawn().isPresent() : api.spawn(online.getWorld().getUID()).isPresent());
+            case "hub_configured" -> Boolean.toString(online == null
+                ? api.hub().isPresent() : api.hub(online.getWorld().getUID()).isPresent());
+            case "warps" -> Integer.toString(api.warpCount());
             case "pending" -> player == null ? "false" : Boolean.toString(api.isPending(player.getUniqueId()));
             case "back_available" -> player == null ? "false" : Boolean.toString(api.back(player.getUniqueId()).isPresent());
             default -> null;
